@@ -111,7 +111,7 @@ void soilTestLoop() {
 
   int adcCheck = readADCOnce();
 
-  Serial.print("ADC check: ");
+  Serial.print("ADC check: "); // Giá trị ADC đọc thô 1 lần để kiểm tra cảm biến có lỗi không
   Serial.println(adcCheck);
 
   if (!isADCValid(adcCheck)) {

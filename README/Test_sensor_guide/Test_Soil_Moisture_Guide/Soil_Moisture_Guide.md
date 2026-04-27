@@ -7,7 +7,6 @@ GND  -> GND ESP32
 AOUT -> GPIO34
 
 ![Flowchart_soi_moisture](Flowchart_soil_moisture.png)
-// Ctrl + Shift + V để hiển thị Preview ảnh
 
 ## 1. BẮT ĐẦU
 

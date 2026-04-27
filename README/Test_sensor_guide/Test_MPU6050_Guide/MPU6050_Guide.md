@@ -8,7 +8,7 @@ MPU6050 SCL  -> ESP32 GPIO22
 MPU6050 SDA  -> ESP32 GPIO21
 
 ![Flowchart](Flowchart_MPU6050.png)
-// Ctrl + Shift + V để hiển thị Preview ảnh
+// Ctrl + Shift + V để hiển thị Preview ảnh trong VS code
 
 ## Giải thích Flowchart
 
