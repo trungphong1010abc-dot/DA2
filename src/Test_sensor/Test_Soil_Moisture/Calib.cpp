@@ -40,6 +40,6 @@ void soilCalibLoop() {
 
 /*
 Giá trị calib thu được:
-- ADC_DRY: 3300
-- ADC_WET: 1300 
+- ADC_DRY: 3400 (giá trị ADC cao nhất đo được khi cảm biến ở ngoài không khí hoặc đất khô)
+- ADC_WET: 1050 (giá trị ADC thấp nhất đo được khi cảm biến ở trong nước hoặc đất rất ẩm)
 */

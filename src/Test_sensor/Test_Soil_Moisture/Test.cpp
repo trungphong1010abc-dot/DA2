@@ -1,8 +1,8 @@
 #include "soil_moisture.h"
 
 // ================== CONFIG ==================
-int ADC_DRY = 3300; // Cần hiệu chỉnh lại giá trị này dựa trên thực tế của cảm biến và môi trường sử dụng
-int ADC_WET = 1300;
+int ADC_DRY = 3400; // Cần hiệu chỉnh lại giá trị này dựa trên thực tế của cảm biến và môi trường sử dụng
+int ADC_WET = 1050;
 
 const int ADC_MIN = 100;
 const int ADC_MAX = 4000;
