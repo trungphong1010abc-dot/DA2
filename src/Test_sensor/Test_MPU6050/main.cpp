@@ -34,6 +34,7 @@ float armsBuffer = 0.0;
 // Timing
 unsigned long t_now = 0;
 unsigned long t_prev = 0;
+unsigned long lastPrintTime = 0;
 
 // Error count
 int sensorErrorCount = 0;
@@ -70,6 +71,7 @@ void mpuTestSetup() {
   beta_dot_prev = 0.0;
 
   t_prev = millis();
+  lastPrintTime = millis();
 
   Serial.println("System ready.");
 }
@@ -82,8 +84,6 @@ void mpuTestLoop() {
   if (t_now - t_prev < SAMPLE_TIME_MS) {
     return;
   }
-
-  Serial.println("-----------------------------");
 
   if (!readMPU6050(Ax, Ay, Az)) {
     sensorErrorCount++;
@@ -116,7 +116,13 @@ void mpuTestLoop() {
   calculateArms();
 
   updateBuffer();
-  printMPUData();
+
+  // In dữ liệu mỗi 2 giây
+  if (t_now - lastPrintTime >= 2000) {
+    Serial.println("-----------------------------");
+    printMPUData();
+    lastPrintTime = t_now;
+  }
 
   beta_prev = beta;
   beta_dot_prev = beta_dot_f;
@@ -151,7 +157,7 @@ bool readMPU6050(float &ax, float &ay, float &az) {
     return false;
   }
 
-  Wire.requestFrom(MPU_ADDR, 6, true);
+  Wire.requestFrom((uint8_t)MPU_ADDR, (uint8_t)6, (uint8_t)true);
 
   if (Wire.available() < 6) {
     return false;
