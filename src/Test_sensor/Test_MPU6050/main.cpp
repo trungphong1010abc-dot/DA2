@@ -1,7 +1,6 @@
 #include "mpu6050_tilt.h"
 
 // ================== GLOBAL VARIABLES ==================
-float Ax = 0, Ay = 0, Az = 0;
 float Ax_raw = 0, Ay_raw = 0, Az_raw = 0;
 
 float Axf = 0, Ayf = 0, Azf = 0;
@@ -35,13 +34,13 @@ void loop() {
   mpuTestLoop();
 }
 
-// ================== MPU TEST SETUP ==================
+// ================== SETUP TEST ==================
 void mpuTestSetup() {
   Serial.begin(115200);
   delay(1000);
 
-  Wire.begin(21, 22);
-  Wire.setClock(400000);
+  Wire.begin(SDA_PIN, SCL_PIN);
+  Wire.setClock(100000);   // dùng 100kHz cho ổn định khi test
 
   Serial.println("=================================");
   Serial.println("TEST MPU6050 TILT SENSOR");
@@ -55,7 +54,7 @@ void mpuTestSetup() {
     Serial.print("Checking MPU6050... Try ");
     Serial.println(i);
 
-    if (mpuInit() && checkMPUConnection()) {
+    if (checkMPUConnection()) {
       connected = true;
       break;
     }
@@ -73,10 +72,21 @@ void mpuTestSetup() {
     }
   }
 
-  Serial.println("MPU6050 connected.");
+  Serial.println("MPU6050 I2C detected at 0x68.");
+
+  if (!mpuInit()) {
+    Serial.println("ERROR: MPU6050 init failed.");
+    Serial.println("SYSTEM STOPPED.");
+
+    while (true) {
+      delay(1000);
+    }
+  }
+
+  Serial.println("MPU6050 initialized.");
 
   if (!readMPU6050(Ax_raw, Ay_raw, Az_raw)) {
-    Serial.println("ERROR: Cannot read MPU6050 first data.");
+    Serial.println("ERROR: Cannot read first MPU6050 data.");
     Serial.println("SYSTEM STOPPED.");
 
     while (true) {
@@ -96,46 +106,31 @@ void mpuTestSetup() {
   Serial.println("System ready.");
 }
 
-// ================== MPU TEST LOOP ==================
+// ================== LOOP TEST ==================
 void mpuTestLoop() {
   t = millis();
 
-  // Block 7: kiểm tra chu kỳ lấy mẫu
   if (t - t_prev < SAMPLE_TIME_MS) {
     return;
   }
 
-  // Block 8 + 9: đọc MPU6050 và kiểm tra lỗi
   if (!readMPU6050(Ax_raw, Ay_raw, Az_raw)) {
     Serial.println("Read MPU6050 error. Skip this loop.");
     return;
   }
 
-  // Block 10
   updateLowPassFilter();
-
-  // Block 11 + 12
   calculatePitchRoll();
-
-  // Block 13
   calculateBeta();
-
-  // Block 14 + 15
   calculateBetaDot();
-
-  // Block 16
   calculateArms();
-
-  // Block 17
   updateBuffer();
 
-  // Block 18: in Serial mỗi 2000ms
   if (t - t_print_prev >= PRINT_TIME_MS) {
     printMPUData();
     t_print_prev = t;
   }
 
-  // Block 19: cập nhật biến
   beta_prev = beta;
   t_prev = t;
 
@@ -144,59 +139,51 @@ void mpuTestLoop() {
   Azf_prev = Azf;
 }
 
+// ================== CHECK CONNECTION ==================
+bool checkMPUConnection() {
+  Wire.beginTransmission(MPU_ADDR);
+  byte error = Wire.endTransmission();
+
+  return (error == 0);
+}
+
 // ================== INIT MPU6050 ==================
 bool mpuInit() {
+  // Wake up MPU6050
   Wire.beginTransmission(MPU_ADDR);
-  Wire.write(0x6B);       // Power Management 1
-  Wire.write(0x00);       // Wake up MPU6050
+  Wire.write(0x6B);
+  Wire.write(0x00);
   if (Wire.endTransmission(true) != 0) {
     return false;
   }
 
   delay(100);
 
+  // Accelerometer config: ±2g
   Wire.beginTransmission(MPU_ADDR);
-  Wire.write(0x1C);       // Accelerometer config
-  Wire.write(0x00);       // ±2g
+  Wire.write(0x1C);
+  Wire.write(0x00);
   if (Wire.endTransmission(true) != 0) {
     return false;
   }
 
+  delay(50);
+
   return true;
-}
-
-// ================== CHECK CONNECTION ==================
-bool checkMPUConnection() {
-  Wire.beginTransmission(MPU_ADDR);
-  Wire.write(0x75);       // WHO_AM_I register
-
-  if (Wire.endTransmission(false) != 0) {
-    return false;
-  }
-
-  Wire.requestFrom(MPU_ADDR, 1, true);
-
-  if (Wire.available() < 1) {
-    return false;
-  }
-
-  byte whoAmI = Wire.read();
-
-  return (whoAmI == 0x68);
 }
 
 // ================== READ ACCEL ==================
 bool readMPU6050(float &ax, float &ay, float &az) {
   Wire.beginTransmission(MPU_ADDR);
-  Wire.write(0x3B);       // ACCEL_XOUT_H
+  Wire.write(0x3B);   // ACCEL_XOUT_H
 
   if (Wire.endTransmission(false) != 0) {
     return false;
   }
 
-  Wire.requestFrom(MPU_ADDR, 6, true);
+  uint8_t bytesRead = Wire.requestFrom((uint8_t)MPU_ADDR, (uint8_t)6, (uint8_t)true);
 
-  if (Wire.available() < 6) {
+  if (bytesRead < 6) {
     return false;
   }
 
@@ -306,3 +293,40 @@ void printMPUData() {
 
   Serial.println("=================================");
 }
+
+/*
+Ax, Ay, Az (g):
+- Gia tốc theo 3 trục của MPU6050 (đã chuẩn hóa về đơn vị g)
+- Khi đứng yên: tổng vector ≈ 1g (trọng lực)
+- Dùng để suy ra góc nghiêng
+
+Axf, Ayf, Azf:
+- Giá trị sau low-pass filter
+- Giảm nhiễu, ổn định tín hiệu trước khi tính toán
+
+pitch (deg):
+- Góc nghiêng theo trục X (cúi/ngửa)
+- Tính từ thành phần gia tốc và trọng lực
+
+roll (deg):
+- Góc nghiêng theo trục Y (nghiêng trái/phải)
+
+β = sqrt(pitch² + roll²):
+- Góc nghiêng tổng (độ dốc của đất)
+- Đại lượng chính để đánh giá trạng thái nghiêng
+
+β_dot (deg/s):
+- Tốc độ thay đổi góc nghiêng
+- β_dot ≈ 0 → ổn định
+- β_dot lớn → đang có chuyển động (trượt, lún)
+
+A_rms (g):
+- Độ lớn tổng của vector gia tốc
+- ≈ 1g → đứng yên
+- >1g → có rung/lắc (dao động cơ học)
+
+=> Ý nghĩa hệ thống:
+- β      → mức độ nghiêng đất
+- β_dot  → tốc độ biến dạng (nguy cơ trượt)
+- A_rms  → mức độ rung động (bất ổn)
+*/
