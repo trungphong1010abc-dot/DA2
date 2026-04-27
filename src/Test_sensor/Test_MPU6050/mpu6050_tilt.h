@@ -6,45 +6,27 @@
 #include <math.h>
 
 // ================== CONFIG ==================
-#define MPU_ADDR 0x68
+#define MPU_ADDR 0x69
 
-const unsigned long SAMPLE_TIME_MS = 200;
-const float ALPHA_ACC = 0.85;
-const float ALPHA_BETA_DOT = 0.85;
+const unsigned long SAMPLE_TIME_MS = 200;    // chu kỳ lấy mẫu 200ms
+const unsigned long PRINT_TIME_MS  = 2000;   // chu kỳ in Serial 2000ms
 
-const int MAX_SENSOR_ERROR = 3;
-
-// ================== DATA STRUCT ==================
-struct MPU6050TiltData {
-  float Ax;
-  float Ay;
-  float Az;
-
-  float Axf;
-  float Ayf;
-  float Azf;
-
-  float pitch;
-  float roll;
-  float beta;
-  float beta_dot;
-  float beta_dot_f;
-  float A_rms;
-};
+const float ALPHA_ACC = 0.85;                // hệ số lọc low-pass
+const int MAX_CONNECT_RETRY = 3;
 
 // ================== FUNCTION DECLARE ==================
 void mpuTestSetup();
 void mpuTestLoop();
 
-void mpuInit();
+bool mpuInit();
+bool checkMPUConnection();
 bool readMPU6050(float &ax, float &ay, float &az);
-bool isAccelValid(float ax, float ay, float az);
 
-void updateLowPassFilter(float ax, float ay, float az);
+void initFilter();
+void updateLowPassFilter();
 void calculatePitchRoll();
 void calculateBeta();
 void calculateBetaDot();
-void filterBetaDot();
 void calculateArms();
 
 void updateBuffer();

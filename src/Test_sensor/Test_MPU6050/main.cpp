@@ -1,163 +1,200 @@
 #include "mpu6050_tilt.h"
 
 // ================== GLOBAL VARIABLES ==================
+float Ax = 0, Ay = 0, Az = 0;
+float Ax_raw = 0, Ay_raw = 0, Az_raw = 0;
 
-// Raw acceleration
-float Ax = 0.0;
-float Ay = 0.0;
-float Az = 0.0;
+float Axf = 0, Ayf = 0, Azf = 0;
+float Axf_prev = 0, Ayf_prev = 0, Azf_prev = 0;
 
-// Filtered acceleration
-float Axf = 0.0;
-float Ayf = 0.0;
-float Azf = 0.0;
+float pitch = 0, roll = 0;
+float pitch_deg = 0, roll_deg = 0;
 
-// Angles
-float pitch = 0.0;
-float roll = 0.0;
-float beta = 0.0;
-float beta_prev = 0.0;
+float beta = 0;
+float beta_prev = 0;
+float beta_dot = 0;
 
-// Angular changing speed
-float beta_dot = 0.0;
-float beta_dot_f = 0.0;
-float beta_dot_prev = 0.0;
+float A_rms = 0;
 
-// Vibration index
-float A_rms = 0.0;
+float betaBuffer = 0;
+float betaDotBuffer = 0;
+float armsBuffer = 0;
 
-// Last-value buffer
-float betaBuffer = 0.0;
-float betaDotBuffer = 0.0;
-float armsBuffer = 0.0;
-
-// Timing
-unsigned long t_now = 0;
+unsigned long t = 0;
 unsigned long t_prev = 0;
-unsigned long lastPrintTime = 0;
+unsigned long t_print_prev = 0;
 
-// Error count
-int sensorErrorCount = 0;
+float dt = 0;
 
-// ================== SETUP TEST ==================
+// ================== SETUP / LOOP ==================
+void setup() {
+  mpuTestSetup();
+}
 
+void loop() {
+  mpuTestLoop();
+}
+
+// ================== MPU TEST SETUP ==================
 void mpuTestSetup() {
   Serial.begin(115200);
   delay(1000);
 
-  Wire.begin();
-  mpuInit();
+  Wire.begin(21, 22);
+  Wire.setClock(400000);
 
   Serial.println("=================================");
-  Serial.println("TEST CAM BIEN MPU6050 DO DO NGHIENG");
+  Serial.println("TEST MPU6050 TILT SENSOR");
   Serial.println("ESP32 + MPU6050");
+  Serial.println("Accelerometer only");
   Serial.println("=================================");
 
-  if (!readMPU6050(Ax, Ay, Az)) {
-    Serial.println("ERROR: Cannot read MPU6050 at startup.");
-    Serial.println("Check wiring: VCC, GND, SDA, SCL.");
-    while (true) delay(1000);
+  bool connected = false;
+
+  for (int i = 1; i <= MAX_CONNECT_RETRY; i++) {
+    Serial.print("Checking MPU6050... Try ");
+    Serial.println(i);
+
+    if (mpuInit() && checkMPUConnection()) {
+      connected = true;
+      break;
+    }
+
+    delay(500);
   }
 
-  // Khoi tao filter ban dau
-  Axf = Ax;
-  Ayf = Ay;
-  Azf = Az;
+  if (!connected) {
+    Serial.println("ERROR: Cannot connect to MPU6050.");
+    Serial.println("Check VCC, GND, SDA, SCL.");
+    Serial.println("SYSTEM STOPPED.");
 
-  calculatePitchRoll();
-  calculateBeta();
+    while (true) {
+      delay(1000);
+    }
+  }
 
-  beta_prev = beta;
-  beta_dot_prev = 0.0;
+  Serial.println("MPU6050 connected.");
+
+  if (!readMPU6050(Ax_raw, Ay_raw, Az_raw)) {
+    Serial.println("ERROR: Cannot read MPU6050 first data.");
+    Serial.println("SYSTEM STOPPED.");
+
+    while (true) {
+      delay(1000);
+    }
+  }
+
+  initFilter();
+
+  beta_prev = 0;
+  beta_dot = 0;
+  A_rms = 0;
 
   t_prev = millis();
-  lastPrintTime = millis();
+  t_print_prev = millis();
 
   Serial.println("System ready.");
 }
 
-// ================== LOOP TEST ==================
-
+// ================== MPU TEST LOOP ==================
 void mpuTestLoop() {
-  t_now = millis();
+  t = millis();
 
-  if (t_now - t_prev < SAMPLE_TIME_MS) {
+  // Block 7: kiểm tra chu kỳ lấy mẫu
+  if (t - t_prev < SAMPLE_TIME_MS) {
     return;
   }
 
-  if (!readMPU6050(Ax, Ay, Az)) {
-    sensorErrorCount++;
-
-    Serial.print("MPU6050 read failed. Error count = ");
-    Serial.println(sensorErrorCount);
-
-    if (sensorErrorCount > MAX_SENSOR_ERROR) {
-      Serial.println("HARDWARE ERROR!");
-      Serial.println("SYSTEM STOPPED.");
-      while (true) delay(1000);
-    }
-
+  // Block 8 + 9: đọc MPU6050 và kiểm tra lỗi
+  if (!readMPU6050(Ax_raw, Ay_raw, Az_raw)) {
+    Serial.println("Read MPU6050 error. Skip this loop.");
     return;
   }
 
-  sensorErrorCount = 0;
+  // Block 10
+  updateLowPassFilter();
 
-  if (!isAccelValid(Ax, Ay, Az)) {
-    Serial.println("Acceleration data invalid.");
-    return;
-  }
-
-  updateLowPassFilter(Ax, Ay, Az);
-
+  // Block 11 + 12
   calculatePitchRoll();
+
+  // Block 13
   calculateBeta();
+
+  // Block 14 + 15
   calculateBetaDot();
-  filterBetaDot();
+
+  // Block 16
   calculateArms();
 
+  // Block 17
   updateBuffer();
 
-  // In dữ liệu mỗi 2 giây
-  if (t_now - lastPrintTime >= 2000) {
-    Serial.println("-----------------------------");
+  // Block 18: in Serial mỗi 2000ms
+  if (t - t_print_prev >= PRINT_TIME_MS) {
     printMPUData();
-    lastPrintTime = t_now;
+    t_print_prev = t;
   }
 
+  // Block 19: cập nhật biến
   beta_prev = beta;
-  beta_dot_prev = beta_dot_f;
-  t_prev = t_now;
+  t_prev = t;
+
+  Axf_prev = Axf;
+  Ayf_prev = Ayf;
+  Azf_prev = Azf;
 }
 
-// ================== MPU INIT ==================
-
-void mpuInit() {
-  // Wake up MPU6050
+// ================== INIT MPU6050 ==================
+bool mpuInit() {
   Wire.beginTransmission(MPU_ADDR);
-  Wire.write(0x6B);
-  Wire.write(0x00);
-  Wire.endTransmission(true);
+  Wire.write(0x6B);       // Power Management 1
+  Wire.write(0x00);       // Wake up MPU6050
+  if (Wire.endTransmission(true) != 0) {
+    return false;
+  }
 
   delay(100);
 
-  // Accelerometer range: +/- 2g
   Wire.beginTransmission(MPU_ADDR);
-  Wire.write(0x1C);
-  Wire.write(0x00);
-  Wire.endTransmission(true);
+  Wire.write(0x1C);       // Accelerometer config
+  Wire.write(0x00);       // ±2g
+  if (Wire.endTransmission(true) != 0) {
+    return false;
+  }
+
+  return true;
 }
 
-// ================== READ MPU6050 ==================
-
-bool readMPU6050(float &ax, float &ay, float &az) {
+// ================== CHECK CONNECTION ==================
+bool checkMPUConnection() {
   Wire.beginTransmission(MPU_ADDR);
-  Wire.write(0x3B);
+  Wire.write(0x75);       // WHO_AM_I register
 
   if (Wire.endTransmission(false) != 0) {
     return false;
   }
 
-  Wire.requestFrom((uint8_t)MPU_ADDR, (uint8_t)6, (uint8_t)true);
+  Wire.requestFrom(MPU_ADDR, 1, true);
+
+  if (Wire.available() < 1) {
+    return false;
+  }
+
+  byte whoAmI = Wire.read();
+
+  return (whoAmI == 0x68);
+}
+
+// ================== READ ACCEL ==================
+bool readMPU6050(float &ax, float &ay, float &az) {
+  Wire.beginTransmission(MPU_ADDR);
+  Wire.write(0x3B);       // ACCEL_XOUT_H
+
+  if (Wire.endTransmission(false) != 0) {
+    return false;
+  }
+
+  Wire.requestFrom(MPU_ADDR, 6, true);
 
   if (Wire.available() < 6) {
     return false;
@@ -167,7 +204,6 @@ bool readMPU6050(float &ax, float &ay, float &az) {
   int16_t rawAy = (Wire.read() << 8) | Wire.read();
   int16_t rawAz = (Wire.read() << 8) | Wire.read();
 
-  // For +/-2g range: 16384 LSB/g
   ax = rawAx / 16384.0;
   ay = rawAy / 16384.0;
   az = rawAz / 16384.0;
@@ -175,113 +211,98 @@ bool readMPU6050(float &ax, float &ay, float &az) {
   return true;
 }
 
-// ================== CHECK DATA ==================
+// ================== INIT FILTER ==================
+void initFilter() {
+  Axf = Ax_raw;
+  Ayf = Ay_raw;
+  Azf = Az_raw;
 
-bool isAccelValid(float ax, float ay, float az) {
-  float a_total = sqrt(ax * ax + ay * ay + az * az);
-
-  // Khi cam bien dung yen, tong gia toc thuong quanh 1g.
-  // Cho phep rong de test: 0.3g -> 2.5g.
-  if (a_total < 0.3 || a_total > 2.5) {
-    return false;
-  }
-
-  return true;
+  Axf_prev = Axf;
+  Ayf_prev = Ayf;
+  Azf_prev = Azf;
 }
 
 // ================== LOW PASS FILTER ==================
-
-void updateLowPassFilter(float ax, float ay, float az) {
-  Axf = ALPHA_ACC * Axf + (1.0 - ALPHA_ACC) * ax;
-  Ayf = ALPHA_ACC * Ayf + (1.0 - ALPHA_ACC) * ay;
-  Azf = ALPHA_ACC * Azf + (1.0 - ALPHA_ACC) * az;
+void updateLowPassFilter() {
+  Axf = ALPHA_ACC * Axf_prev + (1.0 - ALPHA_ACC) * Ax_raw;
+  Ayf = ALPHA_ACC * Ayf_prev + (1.0 - ALPHA_ACC) * Ay_raw;
+  Azf = ALPHA_ACC * Azf_prev + (1.0 - ALPHA_ACC) * Az_raw;
 }
 
-// ================== CALCULATE ANGLES ==================
-
+// ================== PITCH / ROLL ==================
 void calculatePitchRoll() {
-  float pitchRad = atan2(-Axf, sqrt(Ayf * Ayf + Azf * Azf));
-  float rollRad  = atan2(Ayf, sqrt(Axf * Axf + Azf * Azf));
+  pitch = atan2(-Axf, sqrt(Ayf * Ayf + Azf * Azf));
+  roll  = atan2(Ayf, sqrt(Axf * Axf + Azf * Azf));
 
-  pitch = pitchRad * 180.0 / PI;
-  roll  = rollRad  * 180.0 / PI;
+  pitch_deg = pitch * 180.0 / PI;
+  roll_deg  = roll  * 180.0 / PI;
 }
 
+// ================== BETA ==================
 void calculateBeta() {
-  beta = sqrt(pitch * pitch + roll * roll);
+  beta = sqrt(pitch_deg * pitch_deg + roll_deg * roll_deg);
 }
 
-// ================== CALCULATE BETA DOT ==================
-
+// ================== BETA DOT ==================
 void calculateBetaDot() {
-  float dt = (t_now - t_prev) / 1000.0;
+  dt = (t - t_prev) / 1000.0;
 
   if (dt > 0) {
     beta_dot = (beta - beta_prev) / dt;
   } else {
-    beta_dot = 0.0;
+    beta_dot = 0;
   }
 }
 
-void filterBetaDot() {
-  beta_dot_f = ALPHA_BETA_DOT * beta_dot_prev +
-               (1.0 - ALPHA_BETA_DOT) * beta_dot;
-}
-
-// ================== CALCULATE A RMS ==================
-
+// ================== A RMS ==================
 void calculateArms() {
-  A_rms = sqrt((Axf * Axf + Ayf * Ayf + Azf * Azf) / 3.0);
+  A_rms = sqrt(Axf * Axf + Ayf * Ayf + Azf * Azf);
 }
 
 // ================== BUFFER ==================
-
 void updateBuffer() {
   betaBuffer = beta;
-  betaDotBuffer = beta_dot_f;
+  betaDotBuffer = beta_dot;
   armsBuffer = A_rms;
 }
 
 // ================== PRINT DATA ==================
-
 void printMPUData() {
-  Serial.print("Ax: ");
-  Serial.print(Ax, 3);
-  Serial.print(" g | Ay: ");
-  Serial.print(Ay, 3);
-  Serial.print(" g | Az: ");
-  Serial.print(Az, 3);
+  Serial.println("=================================");
+
+  Serial.print("Ax_raw: ");
+  Serial.print(Ax_raw, 3);
+  Serial.print(" g | Ay_raw: ");
+  Serial.print(Ay_raw, 3);
+  Serial.print(" g | Az_raw: ");
+  Serial.print(Az_raw, 3);
+  Serial.println(" g");
+
+  Serial.print("Axf: ");
+  Serial.print(Axf, 3);
+  Serial.print(" g | Ayf: ");
+  Serial.print(Ayf, 3);
+  Serial.print(" g | Azf: ");
+  Serial.print(Azf, 3);
   Serial.println(" g");
 
   Serial.print("Pitch: ");
-  Serial.print(pitch, 2);
+  Serial.print(pitch_deg, 2);
   Serial.print(" deg | Roll: ");
-  Serial.print(roll, 2);
+  Serial.print(roll_deg, 2);
   Serial.println(" deg");
 
   Serial.print("Beta: ");
-  Serial.print(beta, 2);
+  Serial.print(betaBuffer, 2);
   Serial.println(" deg");
 
-  Serial.print("Beta_dot raw: ");
-  Serial.print(beta_dot, 2);
-  Serial.println(" deg/s");
-
-  Serial.print("Beta_dot filtered: ");
+  Serial.print("Beta_dot: ");
   Serial.print(betaDotBuffer, 2);
   Serial.println(" deg/s");
 
   Serial.print("A_rms: ");
   Serial.print(armsBuffer, 3);
   Serial.println(" g");
-}
 
-// ================== ARDUINO MAIN ==================
-
-void setup() {
-  mpuTestSetup();
-}
-
-void loop() {
-  mpuTestLoop();
+  Serial.println("=================================");
 }
