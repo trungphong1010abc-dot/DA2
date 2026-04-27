@@ -1,18 +1,9 @@
-#include <Arduino.h>
+#include "soil_moisture.h"
 
-// ===== CONFIG =====
-#define SOIL_PIN 34              // ADC1: GPIO32–39. GPIO34 là input-only, hợp để đọc analog
-#define SAMPLE_COUNT 11          // N = 10/11, nên dùng số lẻ để lấy median
-#define DISCARD_COUNT 3          // Bỏ 3 mẫu đầu
-#define READ_DELAY_MS 10
-#define LOOP_DELAY_MS 2000
-#define SHORT_DELAY_MS 500
+// ================== CONFIG ==================
+int ADC_DRY = 3300; // Cần hiệu chỉnh lại giá trị này dựa trên thực tế của cảm biến và môi trường sử dụng
+int ADC_WET = 1300;
 
-// Hiệu chuẩn thực nghiệm: cần thay bằng giá trị đo thật
-int ADC_DRY = 3200;              // đất khô / ngoài không khí
-int ADC_WET = 1400;              // đất ướt / nước
-
-// Ngưỡng kiểm tra ADC hợp lệ
 const int ADC_MIN = 100;
 const int ADC_MAX = 4000;
 const int MAX_ADC_ERROR = 3;
@@ -20,7 +11,14 @@ const int MAX_ADC_ERROR = 3;
 int adcErrorCount = 0;
 float soilBuffer = 0.0;
 
-// ===== FUNCTIONS =====
+// ================== HÀM DÙNG CHUNG ==================
+
+void soilInit() {
+  pinMode(SOIL_PIN, INPUT);
+  analogReadResolution(12);
+  analogSetPinAttenuation(SOIL_PIN, ADC_11db);
+}
+
 int readADCOnce() {
   return analogRead(SOIL_PIN);
 }
@@ -39,11 +37,11 @@ int medianFilter(int arr[], int size) {
       }
     }
   }
+
   return arr[size / 2];
 }
 
 int readSoilMedian() {
-  // Bỏ vài mẫu đầu để ADC/cảm biến ổn định
   for (int i = 0; i < DISCARD_COUNT; i++) {
     analogRead(SOIL_PIN);
     delay(READ_DELAY_MS);
@@ -62,31 +60,47 @@ int readSoilMedian() {
 float adcToMoisturePercent(int adcFiltered) {
   float H = (float)(ADC_DRY - adcFiltered) * 100.0 / (ADC_DRY - ADC_WET);
 
-  // Giới hạn H về 0–100%
   if (H < 0) H = 0;
   if (H > 100) H = 100;
 
   return H;
 }
 
-// ===== SETUP =====
-void setup() {
+// ================== TEST MODE ==================
+
+void soilTestSetup() {
   Serial.begin(115200);
   delay(1000);
 
-  analogReadResolution(12);
-  analogSetPinAttenuation(SOIL_PIN, ADC_11db);
+  soilInit();
 
-  Serial.println("=== TEST CAM BIEN DO AM DAT DIEN DUNG ===");
-  Serial.println("ESP32 ready.");
-  delay(1000);
+  Serial.println("=================================");
+  Serial.println("TEST CAM BIEN DO AM DAT DIEN DUNG");
+  Serial.println("ESP32 + Capacitive Soil Moisture");
+  Serial.println("=================================");
+
+  if (ADC_DRY <= ADC_WET) {
+    Serial.println("ERROR: ADC_DRY must be greater than ADC_WET.");
+    while (true) delay(1000);
+  }
+
+  Serial.print("SOIL_PIN: GPIO");
+  Serial.println(SOIL_PIN);
+
+  Serial.print("ADC_DRY: ");
+  Serial.println(ADC_DRY);
+
+  Serial.print("ADC_WET: ");
+  Serial.println(ADC_WET);
+
+  Serial.println("System ready.");
 }
 
-// ===== LOOP =====
-void loop() {
+void soilTestLoop() {
+  Serial.println("-----------------------------");
+
   int adcCheck = readADCOnce();
 
-  Serial.println("--------------------------");
   Serial.print("ADC check: ");
   Serial.println(adcCheck);
 
@@ -97,12 +111,10 @@ void loop() {
     Serial.println(adcErrorCount);
 
     if (adcErrorCount > MAX_ADC_ERROR) {
-      Serial.println("HARDWARE ERROR: Soil sensor or wiring problem.");
+      Serial.println("HARDWARE ERROR!");
       Serial.println("SYSTEM STOPPED.");
 
-      while (true) {
-        delay(1000);
-      }
+      while (true) delay(1000);
     }
 
     delay(SHORT_DELAY_MS);
