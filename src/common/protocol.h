@@ -19,6 +19,8 @@ enum ErrorFlag : uint16_t {
   ERR_BATTERY = 1 << 2,
   ERR_LORA = 1 << 3,
   ERR_PACKET = 1 << 4,
+  ERR_DATA_RANGE = 1 << 5,
+  ERR_CONFIG = 1 << 6,
 };
 
 struct SensorPacket {

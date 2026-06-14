@@ -1,4 +1,17 @@
-# Quy tắc thiết kế hệ thống DA2
+# Phụ lục A. Đặc tả và quy tắc thiết kế hệ thống DA2
+
+Phụ lục này cụ thể hóa các yêu cầu kỹ thuật được trình bày trong Chương 2 và
+Chương 3 của báo cáo. Nội dung được dùng làm căn cứ thống nhất tên biến, đơn vị,
+giao thức, công thức, điều kiện kiểm tra và tiêu chí nghiệm thu trước khi viết
+firmware. Các giá trị gắn nhãn `PROVISIONAL` là giả định thiết kế ban đầu, không
+được trình bày như kết quả đo hoặc kết quả thí nghiệm của khu vực khảo sát.
+
+| Nội dung trong phụ lục | Vị trí thuyết minh chính |
+| --- | --- |
+| Cảm biến, kết nối phần cứng | Mục 3.3, `HARDWARE_WIRING_GUIDE.md` |
+| Nguyên lý và luồng hoạt động | Mục 3.4, `SYSTEM_WORKFLOW.md` |
+| Ngưỡng cảnh báo | Mục 3.5, `BANG_3_2_NGUONG_CANH_BAO.md` |
+| Cơ sở chọn tham số đất | Mục 2.5, `PHAN_TICH_THAM_SO_DAT_DO_BAZAN.md` |
 
 ## 1. Mục đích và phạm vi
 
@@ -258,14 +271,132 @@ Trước khi đóng packet, node phải kiểm tra tối thiểu:
 ```text
 0% <= h_soil <= 100%
 0° <= beta_deg <= 60°
-abs(beta_dot_deg_per_hour) <= 5°/s quy đổi đúng đơn vị thiết kế
+abs(beta_dot_deg_per_hour) <= 360°/h
 0 g <= a_rms_g <= 1 g
-3.2 V <= v_bat <= 4.2 V
+3.0 V <= v_bat <= 4.25 V
 ```
 
-Lưu ý bắt buộc: flowchart đang ghi ngưỡng `beta_dot` theo `°/s`, trong khi
-telemetry chuẩn dùng `°/h`. Trước khi code validation, phải chốt một đơn vị và
-quy đổi ngưỡng rõ ràng. Không so sánh trực tiếp hai đơn vị khác nhau.
+Các khoảng trên là **miền kiểm tra tính hợp lý của dữ liệu** (sanity check),
+không phải toàn bộ là ngưỡng cảnh báo sạt lở. Nếu một giá trị nằm ngoài miền,
+hệ thống chỉ được kết luận dữ liệu/cấu hình/cách lắp cần kiểm tra; không được tự
+động kết luận đất nguy hiểm nếu chưa qua mô hình FS, DI và trạng thái lỗi.
+
+### 6.1 Vì sao `0% <= h_soil <= 100%`
+
+- `h_soil` là chỉ số tương đối được chuẩn hóa từ hai điểm hiệu chuẩn dry/wet.
+- Theo định nghĩa, 0% biểu diễn bằng hoặc khô hơn điểm dry; 100% biểu diễn bằng
+  hoặc ướt hơn điểm wet.
+- Với hiệu chuẩn hiện tại:
+
+```text
+ADC_dry = 3400
+ADC_wet = 1200
+H_soil = (3400 - ADC_filtered) × 100 / 2200
+```
+
+- Giá trị tính trước clamp có thể nhỏ hơn 0% hoặc lớn hơn 100% khi ADC vượt hai
+  điểm hiệu chuẩn. Sau đó clamp về 0–100% để giữ đúng nghĩa chỉ số tương đối.
+- Đây không phải độ ẩm thể tích tuyệt đối và không chứng minh đất bão hòa vật
+  lý ở 100%.
+
+### 6.2 Vì sao chọn `0° <= beta_deg <= 60°`
+
+- `beta_deg = sqrt(pitch_deg² + roll_deg²)` nên theo định nghĩa không âm.
+- Cận 60° xuất phát từ flowchart và được chốt làm miền hợp lệ của mô hình DA2.
+- Mốc này không phải giới hạn phần cứng của MPU6050 và không phải ngưỡng cảnh
+  báo sạt lở. Nó là giới hạn để tránh áp dụng mô hình mái dốc hiện tại cho một
+  tư thế quá dốc hoặc cách gá cảm biến không đúng dự kiến.
+- Trong miền 0–60°, các thành phần `sin(beta)`, `cos(beta)` vẫn phù hợp với mô
+  hình đang dùng và chưa tiến quá gần trạng thái mặt dốc đứng 90°.
+- Giá trị âm, `NaN` hoặc không hữu hạn là lỗi tính toán. Giá trị lớn hơn 60°
+  được đánh dấu `OUT_OF_MODEL_RANGE`; không clamp về 60°.
+- Cảnh báo nguy hiểm vẫn dựa trên FS, DI và `epsilon_star`, không dựa riêng vào
+  điều kiện `beta > 60°`.
+
+### 6.3 Vì sao chọn `|beta_dot_deg_per_hour| <= 360°/h`
+
+- Flowchart ghi sanity limit `|beta_dot| <= 5°/s`, nhưng telemetry chuẩn đang
+  dùng `beta_dot_deg_per_hour`.
+- Hai đơn vị không được so sánh trực tiếp:
+
+```text
+5°/s = 18 000°/h
+```
+
+- `18 000°/h` chỉ có thể dùng để phát hiện chuyển động tức thời cực lớn hoặc
+  lỗi đọc, không phù hợp để đánh giá biến dạng đất chậm.
+- Ngưỡng nguy cơ hiện đang giả định `beta_dot_crit = 2°/h`; đây là ngưỡng DI,
+  không phải sanity maximum và vẫn cần dữ liệu thực nghiệm để xác nhận.
+- Thiết kế tách hai biến:
+
+```text
+beta_dot_crit       = ngưỡng nguy cơ dùng trong DI
+beta_dot_sanity_max = 360°/h = 0.1°/s
+```
+
+- Chọn `360°/h` vì nó tương đương thay đổi 0.1° mỗi giây. Đây đã là chuyển động
+  rất nhanh đối với biến dạng đất, nhưng vẫn thấp hơn nhiều so với giới hạn
+  `5°/s` của flowchart nên có khả năng phát hiện lỗi timestamp, board bị xoay
+  bằng tay hoặc mẫu góc nhảy bất thường.
+- Giá trị này lớn gấp 180 lần `beta_dot_crit = 2°/h`, vì vậy sanity check không
+  cắt mất vùng WARNING/DANGER của DI.
+- Nếu vượt 360°/h, đặt `MPU_DATA_OUT_OF_RANGE`; không clamp beta-dot về 360°/h.
+
+### 6.4 Vì sao chọn `0 g <= a_rms_g <= 1 g`
+
+- RMS là căn bậc hai của trung bình bình phương nên không thể âm.
+- Firmware cấu hình accelerometer MPU6050 ở thang `±2 g`. Chọn `1 g` làm cận
+  RMS hợp lệ bảo thủ: bằng một nửa full-scale nhưng vẫn cao hơn rất nhiều mức
+  rung dùng cho DI.
+- `1 g` nhằm phát hiện rung cực lớn, sai thang đo, cảm biến lỏng hoặc lỗi tính
+  toán; nó không phải ngưỡng sạt lở.
+- Chỉ số rung trong thiết kế là phần dư sau low-pass, vì vậy trong vận hành bình
+  thường thường nhỏ hơn nhiều so với 1 g.
+- Ngưỡng nguy cơ DI hiện giả định `A_crit = 0.05 g`, nhưng phải được chọn từ
+  phân bố rung nền và thử nghiệm dịch chuyển có gắn nhãn.
+- Nếu `A_rms > 1 g`, đánh dấu dữ liệu rung ngoài miền thiết kế; không clamp về
+  1 g. Mẫu gia tốc thô từng trục vẫn phải được kiểm tra riêng với full-scale
+  `±2 g` của cấu hình.
+
+### 6.5 Vì sao chọn `3.0 V <= v_bat <= 4.25 V`
+
+- Khoảng này chốt theo giả định node sử dụng một cell Li-ion/LiPo danh định
+  3.7 V và được sạc tới khoảng 4.2 V.
+- Cận trên chọn 4.25 V để có dung sai đo nhỏ quanh mức sạc 4.2 V. Datasheet bộ
+  sạc một cell TI BQ2407x dùng mức regulation 4.2 V và thể hiện giá trị cực đại
+  khoảng 4.23 V cho biến thể tương ứng; vì vậy đo trên 4.25 V cần xem là bất
+  thường hoặc sai hệ số chia áp.
+- Cận dưới chọn 3.0 V làm sanity limit bảo thủ cho một cell Li-ion gần cạn. Nó
+  thấp hơn ngưỡng điều khiển pin rất yếu 3.3 V để các giá trị 3.0–3.3 V vẫn
+  được truyền về với trạng thái `BATTERY_CRITICAL` thay vì bị loại ngay.
+- Các ngưỡng điều khiển vẫn tách riêng: pin yếu dưới 3.5 V và pin rất yếu dưới
+  3.3 V.
+- Nếu dùng loại pin khác, số cell khác, LiFePO4, nguồn USB hoặc mạch bảo vệ có
+  ngưỡng khác, toàn bộ miền 3.0–4.25 V phải được thay đổi.
+- Điện áp ngoài miền có thể do sai hệ số chia áp, sai ADC reference, đấu dây,
+  pin quá áp/quá xả hoặc loại nguồn không đúng cấu hình.
+
+### 6.6 Trạng thái chốt của các miền validation
+
+| Đại lượng | Nguồn miền hiện tại | Trạng thái | Có dùng trực tiếp làm cảnh báo? |
+| --- | --- | --- | --- |
+| `h_soil` 0–100% | Định nghĩa phép chuẩn hóa và clamp | Đã chốt theo chỉ số tương đối | Không |
+| `beta_deg` 0–60° | Flowchart + miền mô hình DA2 | Chốt cho phiên bản hiện tại | Không |
+| `beta_dot` ±360°/h | Suy luận từ 0.1°/s và ngưỡng DI 2°/h | Chốt cho phiên bản hiện tại | Không; chỉ kiểm tra mẫu |
+| `a_rms_g` 0–1 g | Flowchart + MPU6050 cấu hình ±2 g | Chốt cho phiên bản hiện tại | Không |
+| `v_bat` 3.0–4.25 V | Pin Li-ion/LiPo 1 cell, sạc 4.2 V | Chốt nếu đúng loại pin | Pin có nhánh cảnh báo riêng |
+
+### 6.7 Nguồn và mức độ tin cậy
+
+- TDK InvenSense MPU-6050: nguồn xác nhận cảm biến hỗ trợ các thang gia tốc;
+  firmware DA2 đang chọn `±2 g`. Datasheet không quy định ngưỡng sạt lở:
+  <https://invensense.tdk.com/en-us/products/motion-tracking/6-axis/mpu-6050/>
+- Texas Instruments BQ2407x: nguồn tham khảo mức regulation 4.2 V cho bộ sạc
+  Li-ion một cell:
+  <https://www.ti.com/lit/ds/symlink/bq24074.pdf>
+- Các cận 60°, 360°/h và 1 g là quyết định kỹ thuật của đồ án dựa trên flowchart,
+  cấu hình cảm biến và khoảng cách đủ lớn so với ngưỡng DI; chúng không phải
+  ngưỡng sạt lở được công bố bởi nhà sản xuất.
 
 Dữ liệu lỗi vẫn có thể được đóng packet để gateway biết trạng thái, nhưng phải
 có `error_flag != 0`; không được giả thành packet bình thường.
@@ -334,6 +465,10 @@ Quy tắc:
 
 ## 9. Mô hình phân tích địa kỹ thuật
 
+Bộ tham số giả định cụ thể cho profile đất đỏ bazan phong hóa pha sét được phân
+tích tại `README/PHAN_TICH_THAM_SO_DAT_DO_BAZAN.md`. Profile này dùng cho triển
+khai phần mềm ban đầu và phải mang trạng thái `PROVISIONAL`.
+
 ### 9.1 Áp lực nước lỗ rỗng
 
 ```text
@@ -343,7 +478,7 @@ u = u_max × max(0, (H_soil - H_c) / (H_sat - H_c))
 - `H_soil`, `H_c`, `H_sat` phải cùng cách biểu diễn: cùng là % hoặc cùng 0–1.
 - Không tự chặn phía trên nếu công thức thiết kế chỉ yêu cầu `max(0, ...)`.
 - Nếu muốn giới hạn `u <= u_max`, phải cập nhật đặc tả và nêu lý do vật lý.
-- `H_c=65%`, `H_sat=95%`, `u_max=12 kPa` hiện là giả định thiết kế, chưa được
+- `H_c=65%`, `H_sat=95%`, `u_max=10 kPa` hiện là giả định thiết kế, chưa được
   fit bằng phép đo áp lực nước lỗ rỗng.
 
 Nguồn và cách lựa chọn:
@@ -411,20 +546,22 @@ DI = w1 × abs(beta_dot / beta_dot_crit)
 - Công bố `w1`, `w2`, `beta_dot_crit`, `A_crit` trong cấu hình.
 - `beta_dot` và `beta_dot_crit` phải cùng đơn vị.
 - Nếu `A_rms` không âm theo định nghĩa, không cần lấy trị tuyệt đối.
-- `beta_dot_crit=3 độ/giờ`, `A_crit=0.08 g`, `w1=0.55`, `w2=0.45` là giả
+- `beta_dot_crit=2 độ/giờ`, `A_crit=0.05 g`, `w1=0.70`, `w2=0.30` là giả
   định thiết kế hiện tại; phải được kiểm chứng bằng dữ liệu có nhãn.
 
 Nguồn và cách lựa chọn:
 
 - `beta_dot_crit`: đo noise/drift khi đứng yên và đo các thử nghiệm ổn định,
   bắt đầu dịch chuyển, nguy hiểm; chọn ngưỡng theo false alarm và missed
-  detection. Giá trị 3 độ/giờ hiện chưa có dữ liệu chứng minh.
+  detection. Giá trị 2 độ/giờ hiện chưa có dữ liệu hiện trường chứng minh.
 - `A_crit`: đo `A_rms` nền sau khi gắn MPU6050, các nguồn rung môi trường bình
   thường và các thử nghiệm dịch chuyển có nhãn. Datasheet MPU6050 không cung
-  cấp ngưỡng rung gây sạt lở. Giá trị 0.08 g hiện là giả định.
+  cấp ngưỡng rung gây sạt lở. Giá trị 0.05 g hiện là giả định.
 - `w1`, `w2` phải không âm và có tổng bằng 1. Có thể chọn bằng chuyên gia khi
   chưa có dữ liệu, nhưng tốt hơn là tối ưu trên tập dữ liệu có nhãn và kiểm tra
-  sensitivity. Cặp 0.55/0.45 chỉ biểu thị ưu tiên nhẹ cho tốc độ nghiêng.
+  sensitivity. Cặp 0.70/0.30 biểu thị quyết định thiết kế ưu tiên xu hướng thay
+  đổi góc so với rung tức thời, do chuyển vị chậm phù hợp hơn với mục tiêu theo
+  dõi biến dạng mái dốc của mô hình thử nghiệm.
 
 ### 9.4 Độ giãn tương đối quy ước
 
@@ -703,3 +840,12 @@ Các mục sau phải được chốt bằng tài liệu trước khi triển kh
 8. Chính sách command khi node đang deep sleep.
 9. Cách hỗ trợ nhiều hơn 100 node và thời hạn lưu duplicate history.
 10. Ngưỡng ADC, pin và địa kỹ thuật sau hiệu chuẩn thực nghiệm.
+
+## 16. Kết luận phụ lục
+
+Phụ lục xác lập cấu hình cơ sở `BASALT_RED_SOIL_V1_PROVISIONAL` để các bước mô
+phỏng, thiết kế telemetry và kiểm thử dùng cùng một bộ giá trị. Khi có số liệu
+khảo sát hoặc thí nghiệm, chỉ được thay tham số thông qua một phiên bản profile
+mới có ghi nguồn, đơn vị, ngày cập nhật và ảnh hưởng tới FS, DI, cảnh báo và chu
+kỳ ngủ. Kiến trúc thực thi hiện tại vẫn là superloop; việc chuyển sang FreeRTOS
+là giai đoạn nâng cấp sau và không làm thay đổi ý nghĩa dữ liệu hay công thức.

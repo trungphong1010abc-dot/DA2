@@ -13,13 +13,14 @@ static constexpr uint8_t NODE_ID = 1;
 static constexpr const char *PROJECT_TAG = "DA2_SOIL_STRAIN";
 
 // ---------- WiFi / ThingsBoard ----------
-static constexpr const char *WIFI_SSID = "Tuan";
-static constexpr const char *WIFI_PASSWORD = "88888888";
+static constexpr const char *WIFI_SSID = "Khoa";
+static constexpr const char *WIFI_PASSWORD = "12112004";
 
 static constexpr const char *TB_HOST = "mqtt.eu.thingsboard.cloud";
 static constexpr uint16_t TB_PORT = 1883;
 static constexpr const char *TB_TOKEN = "NAZJoUt0FVRMKKIMkp4R";
 static constexpr const char *TB_TELEMETRY_TOPIC = "v1/devices/me/telemetry";
+static constexpr const char *PARAMETER_PROFILE = "BASALT_RED_SOIL_V1_PROVISIONAL";
 
 // ---------- LoRa RA-02 / SX1278 ----------
 // RA-02 is commonly the 433 MHz SX1278 module. Change if your module is 868/915 MHz.
@@ -48,18 +49,24 @@ static constexpr int SENSOR_POWER_PIN = -1; // Set to a GPIO if sensor VCC is sw
 
 // Calibrate these two values with your real soil sensor.
 // For many capacitive probes: dry ADC is high, wet ADC is low.
-static constexpr int SOIL_ADC_DRY = 3000;
+static constexpr int SOIL_ADC_DRY = 3400;
 static constexpr int SOIL_ADC_WET = 1200;
 static constexpr int SOIL_ADC_MIN_VALID = 100;
 static constexpr int SOIL_ADC_MAX_VALID = 4090;
 static constexpr uint8_t SOIL_SAMPLE_COUNT = 11;
+static constexpr uint8_t SOIL_DISCARD_SAMPLE_COUNT = 3;
+static constexpr uint8_t SOIL_MAX_READ_ERRORS = 3;
+static constexpr uint32_t SOIL_RETRY_DELAY_MS = 400;
 
-// Battery divider: VBAT+ -- 220k -- ADC -- 100k -- GND.
-static constexpr float ADC_REFERENCE_V = 3.30f;
+// Battery divider: VBAT+ -- 220k -- GPIO35 -- 100k -- GND.
 static constexpr float BAT_DIVIDER_R_TOP_OHM = 220000.0f;
 static constexpr float BAT_DIVIDER_R_BOTTOM_OHM = 100000.0f;
+// Adjust only after comparing GPIO35 millivolts and battery voltage with a multimeter.
+static constexpr float BATTERY_VOLTAGE_CALIBRATION = 1.000f;
 static constexpr float BATTERY_LOW_V = 3.50f;
 static constexpr float BATTERY_CRITICAL_V = 3.30f;
+static constexpr float BATTERY_SANITY_MIN_V = 3.00f;
+static constexpr float BATTERY_SANITY_MAX_V = 4.25f;
 
 // ---------- Sampling / retry ----------
 static constexpr uint32_t SENSOR_WARMUP_MS = 800;
@@ -80,7 +87,7 @@ static constexpr float SOIL_GAMMA_KN_M3 = 18.0f;
 static constexpr float SLIP_LAYER_DEPTH_M = 1.0f;
 static constexpr float SOIL_COHESION_KPA = 5.0f;
 static constexpr float SOIL_FRICTION_ANGLE_DEG = 28.0f;
-static constexpr float PORE_PRESSURE_MAX_KPA = 12.0f;
+static constexpr float PORE_PRESSURE_MAX_KPA = 10.0f;
 static constexpr float MOISTURE_DANGER_START_PERCENT = 65.0f;
 static constexpr float MOISTURE_SATURATION_PERCENT = 95.0f;
 
@@ -89,11 +96,33 @@ static constexpr float FS_WARNING = 1.3f;
 static constexpr float STRAIN_WARNING = 0.77f;
 static constexpr float STRAIN_DANGER = 1.0f;
 
-static constexpr float BETA_DOT_CRIT_DEG_PER_HOUR = 3.0f;
-static constexpr float A_RMS_CRIT_G = 0.08f;
+static constexpr float BETA_DOT_CRIT_DEG_PER_HOUR = 2.0f;
+static constexpr float A_RMS_CRIT_G = 0.05f;
 static constexpr float DI_WARNING = 0.5f;
 static constexpr float DI_DANGER = 1.0f;
-static constexpr float DI_WEIGHT_BETA_DOT = 0.55f;
-static constexpr float DI_WEIGHT_VIBRATION = 0.45f;
+static constexpr float DI_WEIGHT_BETA_DOT = 0.70f;
+static constexpr float DI_WEIGHT_VIBRATION = 0.30f;
+
+// ---------- Data sanity limits ----------
+static constexpr float SOIL_PERCENT_MIN = 0.0f;
+static constexpr float SOIL_PERCENT_MAX = 100.0f;
+static constexpr float BETA_MIN_DEG = 0.0f;
+static constexpr float BETA_MAX_DEG = 60.0f;
+static constexpr float BETA_DOT_SANITY_MAX_DEG_PER_HOUR = 360.0f;
+static constexpr float A_RMS_MIN_G = 0.0f;
+static constexpr float A_RMS_MAX_G = 1.0f;
+
+// OTA is not implemented in the current superloop firmware.
+static constexpr bool OTA_SUPPORTED = false;
+
+// Gateway RAM offline queue. Persistence across reset remains a future design item.
+static constexpr size_t GATEWAY_OFFLINE_QUEUE_CAPACITY = 8;
+static constexpr size_t GATEWAY_TELEMETRY_MAX_BYTES = 1536;
+
+static_assert(SOIL_ADC_DRY != SOIL_ADC_WET, "Soil calibration denominator must not be zero");
+static_assert(MOISTURE_SATURATION_PERCENT > MOISTURE_DANGER_START_PERCENT,
+              "H_sat must be greater than H_c");
+static_assert(BETA_DOT_CRIT_DEG_PER_HOUR > 0.0f && A_RMS_CRIT_G > 0.0f,
+              "DI critical values must be positive");
 
 } // namespace Config

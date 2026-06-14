@@ -7,6 +7,7 @@
 
 #include "project_config.h"
 #include "protocol.h"
+#include "analysis.h"
 
 namespace {
 
@@ -29,6 +30,8 @@ RTC_DATA_ATTR uint32_t rtcPacketId = 0;
 RTC_DATA_ATTR uint32_t rtcSleepSeconds = Config::SLEEP_NORMAL_SEC;
 RTC_DATA_ATTR float rtcPreviousBetaDeg = 0.0f;
 RTC_DATA_ATTR bool rtcHasPreviousBeta = false;
+RTC_DATA_ATTR bool rtcPendingPacketValid = false;
+RTC_DATA_ATTR char rtcPendingPacket[640] = {0};
 
 bool loraReady = false;
 bool mpuReady = false;
@@ -73,21 +76,31 @@ SoilReadout readSoil() {
   SoilReadout result;
   int samples[Config::SOIL_SAMPLE_COUNT];
   uint8_t validCount = 0;
+  uint8_t consecutiveErrors = 0;
 
   powerSensors(true);
   delay(Config::SENSOR_WARMUP_MS);
 
-  for (uint8_t i = 0; i < Config::SOIL_SAMPLE_COUNT; ++i) {
-    const int raw = analogRead(Config::SOIL_ADC_PIN);
-    if (raw >= Config::SOIL_ADC_MIN_VALID && raw <= Config::SOIL_ADC_MAX_VALID) {
-      samples[validCount++] = raw;
-    }
+  for (uint8_t i = 0; i < Config::SOIL_DISCARD_SAMPLE_COUNT; ++i) {
+    analogRead(Config::SOIL_ADC_PIN);
     delay(25);
   }
 
-  if (validCount < 3) {
-    result.ok = false;
-    return result;
+  while (validCount < Config::SOIL_SAMPLE_COUNT) {
+    const int raw = analogRead(Config::SOIL_ADC_PIN);
+    if (raw > Config::SOIL_ADC_MIN_VALID && raw < Config::SOIL_ADC_MAX_VALID) {
+      samples[validCount++] = raw;
+      consecutiveErrors = 0;
+      delay(25);
+      continue;
+    }
+
+    ++consecutiveErrors;
+    if (consecutiveErrors > Config::SOIL_MAX_READ_ERRORS) {
+      Serial.printf("[Soil] read failed raw=%d errors=%u\n", raw, consecutiveErrors);
+      return result;
+    }
+    delay(Config::SOIL_RETRY_DELAY_MS);
   }
 
   sortIntArray(samples, validCount);
@@ -153,8 +166,16 @@ bool initMpu6050() {
   Wire.setClock(400000);
 
   uint8_t whoAmI = 0;
-  if (!mpuReadReg(0x75, whoAmI) || (whoAmI != 0x68 && whoAmI != 0x70)) {
-    Serial.printf("[MPU] WHO_AM_I invalid: 0x%02X\n", whoAmI);
+  bool identified = false;
+  for (uint8_t attempt = 0; attempt <= 3; ++attempt) {
+    if (mpuReadReg(0x75, whoAmI) && (whoAmI == 0x68 || whoAmI == 0x70)) {
+      identified = true;
+      break;
+    }
+    delay(100);
+  }
+  if (!identified) {
+    Serial.printf("[MPU] init failed WHO_AM_I=0x%02X\n", whoAmI);
     return false;
   }
 
@@ -184,7 +205,6 @@ MpuReadout readMpuWindow() {
   float axFiltered = ax;
   float ayFiltered = ay;
   float azFiltered = az;
-  float firstBeta = 0.0f;
   float lastBeta = 0.0f;
   float vibrationSquaredSum = 0.0f;
   uint16_t sampleCount = 0;
@@ -199,8 +219,16 @@ MpuReadout readMpuWindow() {
     }
     lastSampleMs = nowMs;
 
-    if (!readAccel(ax, ay, az)) {
-      result.ok = false;
+    bool sampleRead = false;
+    for (uint8_t attempt = 0; attempt <= 3; ++attempt) {
+      if (readAccel(ax, ay, az)) {
+        sampleRead = true;
+        break;
+      }
+      delay(20);
+    }
+    if (!sampleRead) {
+      Serial.println("[MPU] sample read failed after retries");
       return result;
     }
 
@@ -220,9 +248,6 @@ MpuReadout readMpuWindow() {
     const float vibration = sqrtf(axVib * axVib + ayVib * ayVib + azVib * azVib);
     vibrationSquaredSum += vibration * vibration;
 
-    if (sampleCount == 0) {
-      firstBeta = betaDeg;
-    }
     lastBeta = betaDeg;
     result.pitchDeg = pitchDeg;
     result.rollDeg = rollDeg;
@@ -237,18 +262,12 @@ MpuReadout readMpuWindow() {
   result.betaDeg = lastBeta;
   result.vibrationRmsG = sqrtf(vibrationSquaredSum / static_cast<float>(sampleCount));
 
-  const float windowHours = (Config::MPU_WINDOW_MS / 1000.0f) / 3600.0f;
-  float betaDotWindow = 0.0f;
-  if (windowHours > 0.0f) {
-    betaDotWindow = (lastBeta - firstBeta) / windowHours;
-  }
-
   if (rtcHasPreviousBeta) {
     const float cycleHours =
         (static_cast<float>(rtcSleepSeconds) + Config::MPU_WINDOW_MS / 1000.0f) / 3600.0f;
     result.betaDotDegPerHour = (lastBeta - rtcPreviousBetaDeg) / cycleHours;
   } else {
-    result.betaDotDegPerHour = betaDotWindow;
+    result.betaDotDegPerHour = 0.0f;
   }
 
   result.ok = true;
@@ -256,17 +275,18 @@ MpuReadout readMpuWindow() {
 }
 
 float readBatteryVoltage() {
-  uint32_t sum = 0;
+  uint32_t millivoltSum = 0;
   constexpr uint8_t sampleCount = 16;
   for (uint8_t i = 0; i < sampleCount; ++i) {
-    sum += analogRead(Config::BATTERY_ADC_PIN);
+    millivoltSum += analogReadMilliVolts(Config::BATTERY_ADC_PIN);
     delay(5);
   }
-  const float raw = static_cast<float>(sum) / static_cast<float>(sampleCount);
-  const float adcVoltage = raw * Config::ADC_REFERENCE_V / 4095.0f;
-  return adcVoltage *
-         ((Config::BAT_DIVIDER_R_TOP_OHM + Config::BAT_DIVIDER_R_BOTTOM_OHM) /
-          Config::BAT_DIVIDER_R_BOTTOM_OHM);
+  const float adcVoltage =
+      (static_cast<float>(millivoltSum) / static_cast<float>(sampleCount)) / 1000.0f;
+  const float dividerRatio =
+      (Config::BAT_DIVIDER_R_TOP_OHM + Config::BAT_DIVIDER_R_BOTTOM_OHM) /
+      Config::BAT_DIVIDER_R_BOTTOM_OHM;
+  return adcVoltage * dividerRatio * Config::BATTERY_VOLTAGE_CALIBRATION;
 }
 
 bool initLora() {
@@ -302,14 +322,18 @@ String readLoraPacket() {
   return packet;
 }
 
-bool sendTelemetryAndWaitAck(const Protocol::SensorPacket &data, Protocol::AckPacket &ack) {
+bool sendPacketAndWaitAck(const String &packet,
+                          uint32_t expectedPacketId,
+                          Protocol::AckPacket &ack) {
   if (!loraReady) {
     return false;
   }
 
-  const String packet = Protocol::buildDataPacket(data);
   for (uint8_t retry = 0; retry < Config::LORA_MAX_RETRY; ++retry) {
-    Serial.printf("[LoRa] TX retry=%u payload=%s\n", retry, packet.c_str());
+    Serial.printf("[LoRa] TX attempt=%u/%u packet_id=%lu\n",
+                  retry + 1,
+                  Config::LORA_MAX_RETRY,
+                  static_cast<unsigned long>(expectedPacketId));
     LoRa.idle();
     LoRa.beginPacket();
     LoRa.print(packet);
@@ -328,7 +352,8 @@ bool sendTelemetryAndWaitAck(const Protocol::SensorPacket &data, Protocol::AckPa
       if (Protocol::parseAckPacket(incoming, parsedAck) &&
           parsedAck.gatewayId == Config::GATEWAY_ID &&
           parsedAck.nodeId == Config::NODE_ID &&
-          parsedAck.packetId == data.packetId) {
+          parsedAck.packetId == expectedPacketId &&
+          (parsedAck.status == "OK" || parsedAck.status == "DUPLICATE")) {
         ack = parsedAck;
         Serial.printf("[LoRa] ACK status=%s sleep=%.1f minutes alert=%s\n",
                       ack.status.c_str(),
@@ -344,27 +369,66 @@ bool sendTelemetryAndWaitAck(const Protocol::SensorPacket &data, Protocol::AckPa
   return false;
 }
 
+bool sendTelemetryAndWaitAck(const Protocol::SensorPacket &data, Protocol::AckPacket &ack) {
+  return sendPacketAndWaitAck(Protocol::buildDataPacket(data), data.packetId, ack);
+}
+
+void storePendingPacket(const String &packet) {
+  if (packet.length() >= sizeof(rtcPendingPacket)) {
+    Serial.println("[BUFFER] packet too large, cannot save pending telemetry");
+    return;
+  }
+  if (rtcPendingPacketValid) {
+    Serial.println("[BUFFER] full, newest unsent packet dropped");
+    return;
+  }
+  packet.toCharArray(rtcPendingPacket, sizeof(rtcPendingPacket));
+  rtcPendingPacketValid = true;
+  Serial.println("[BUFFER] telemetry saved in RTC pending slot");
+}
+
+void flushPendingPacket() {
+  if (!rtcPendingPacketValid || !loraReady) {
+    return;
+  }
+
+  const String packet(rtcPendingPacket);
+  Protocol::SensorPacket pendingData;
+  if (!Protocol::parseDataPacket(packet, pendingData)) {
+    Serial.println("[BUFFER] invalid pending packet discarded");
+    rtcPendingPacketValid = false;
+    rtcPendingPacket[0] = '\0';
+    return;
+  }
+
+  Protocol::AckPacket ack;
+  Serial.printf("[BUFFER] retry packet_id=%lu\n",
+                static_cast<unsigned long>(pendingData.packetId));
+  if (sendPacketAndWaitAck(packet, pendingData.packetId, ack)) {
+    rtcPendingPacketValid = false;
+    rtcPendingPacket[0] = '\0';
+    Serial.println("[BUFFER] pending telemetry acknowledged");
+  } else {
+    Serial.println("[BUFFER] pending telemetry still waiting for ACK");
+  }
+}
+
+void validateSnapshot(Protocol::SensorPacket &data) {
+  const bool sensorValuesInRange =
+      isfinite(data.soilPercent) && data.soilPercent >= Config::SOIL_PERCENT_MIN &&
+      data.soilPercent <= Config::SOIL_PERCENT_MAX && isfinite(data.betaDeg) &&
+      data.betaDeg >= Config::BETA_MIN_DEG && data.betaDeg <= Config::BETA_MAX_DEG &&
+      isfinite(data.betaDotDegPerHour) &&
+      fabsf(data.betaDotDegPerHour) <= Config::BETA_DOT_SANITY_MAX_DEG_PER_HOUR &&
+      isfinite(data.vibrationRmsG) && data.vibrationRmsG >= Config::A_RMS_MIN_G &&
+      data.vibrationRmsG <= Config::A_RMS_MAX_G;
+  if (!sensorValuesInRange) {
+    data.errorFlags |= Protocol::ERR_DATA_RANGE;
+  }
+}
+
 uint32_t localSleepFallback(const Protocol::SensorPacket &data) {
-  if ((data.errorFlags & (Protocol::ERR_SOIL | Protocol::ERR_MPU | Protocol::ERR_LORA)) != 0) {
-    return Config::SLEEP_SENSOR_ERROR_SEC;
-  }
-  if (data.batteryV > 0.1f && data.batteryV < Config::BATTERY_CRITICAL_V) {
-    return Config::SLEEP_SENSOR_ERROR_SEC;
-  }
-  if (data.batteryV > 0.1f && data.batteryV < Config::BATTERY_LOW_V) {
-    return Config::SLEEP_WARNING_SEC;
-  }
-  if (data.soilPercent >= 85.0f ||
-      fabsf(data.betaDotDegPerHour) >= Config::BETA_DOT_CRIT_DEG_PER_HOUR ||
-      data.vibrationRmsG >= Config::A_RMS_CRIT_G) {
-    return Config::SLEEP_DANGER_SEC;
-  }
-  if (data.soilPercent >= Config::MOISTURE_DANGER_START_PERCENT ||
-      fabsf(data.betaDotDegPerHour) >= Config::BETA_DOT_CRIT_DEG_PER_HOUR * 0.5f ||
-      data.vibrationRmsG >= Config::A_RMS_CRIT_G * 0.5f) {
-    return Config::SLEEP_WARNING_SEC;
-  }
-  return Config::SLEEP_NORMAL_SEC;
+  return Analysis::evaluate(data).nextSleepSeconds;
 }
 
 void sleepOrDelay(uint32_t sleepSeconds) {
@@ -385,6 +449,8 @@ void sleepOrDelay(uint32_t sleepSeconds) {
 }
 
 void runCycle() {
+  flushPendingPacket();
+
   Protocol::SensorPacket data;
   data.gatewayId = Config::GATEWAY_ID;
   data.nodeId = Config::NODE_ID;
@@ -409,16 +475,23 @@ void runCycle() {
   }
 
   data.batteryV = readBatteryVoltage();
-  if (data.batteryV > 0.1f && data.batteryV < Config::BATTERY_CRITICAL_V) {
+  if (!isfinite(data.batteryV) || data.batteryV < Config::BATTERY_SANITY_MIN_V ||
+      data.batteryV > Config::BATTERY_SANITY_MAX_V) {
     data.errorFlags |= Protocol::ERR_BATTERY;
   }
+
+  validateSnapshot(data);
 
   Protocol::AckPacket ack;
   bool ackOk = sendTelemetryAndWaitAck(data, ack);
   uint32_t nextSleep = localSleepFallback(data);
   if (!ackOk) {
     data.errorFlags |= Protocol::ERR_LORA;
-    Serial.println("[LoRa] no ACK, using local sleep fallback");
+    storePendingPacket(Protocol::buildDataPacket(data));
+    Serial.printf("[LoRa] no ACK after %u attempts; error_flag=%u (%s), using local sleep fallback\n",
+                  Config::LORA_MAX_RETRY,
+                  data.errorFlags,
+                  Analysis::errorFlagsToText(data.errorFlags));
   } else if (ack.sleepSeconds > 0) {
     nextSleep = ack.sleepSeconds;
   }
@@ -428,14 +501,20 @@ void runCycle() {
     rtcHasPreviousBeta = true;
   }
 
-  Serial.printf("[DATA] adc=%d h=%.2f beta=%.3f bdot=%.4f arms=%.5f vbat=%.3f err=%u\n",
+  Serial.printf("[DATA] packet_id=%lu soil_adc_filtered=%d h_soil=%.2f beta_deg=%.3f "
+                "beta_dot_deg_per_hour=%.4f a_rms_g=%.5f pitch_deg=%.3f "
+                "roll_deg=%.3f v_bat=%.3f error_flag=%u error_text=%s\n",
+                static_cast<unsigned long>(data.packetId),
                 data.soilAdc,
                 data.soilPercent,
                 data.betaDeg,
                 data.betaDotDegPerHour,
                 data.vibrationRmsG,
+                data.pitchDeg,
+                data.rollDeg,
                 data.batteryV,
-                data.errorFlags);
+                data.errorFlags,
+                Analysis::errorFlagsToText(data.errorFlags));
   sleepOrDelay(nextSleep);
 }
 

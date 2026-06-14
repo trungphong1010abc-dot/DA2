@@ -1,6 +1,11 @@
-# Luồng công việc tổng quan hệ thống DA2
+# 3.4 Nguyên lý hoạt động và lưu đồ thuật toán
 
-## 1. Quy ước đọc luồng
+Nội dung mục này trình bày trình tự hoạt động của hệ thống từ thời điểm node
+thức dậy, thu thập dữ liệu cảm biến, truyền packet LoRa, xử lý tại gateway đến
+khi dữ liệu được gửi lên ThingsBoard. Các luồng được mô tả bằng chuỗi hành động
+và nhánh quyết định để thuận tiện chuyển thành lưu đồ trong báo cáo.
+
+## 3.4.1 Quy ước mô tả luồng
 
 - `→`: hành động tiếp theo.
 - `Yes/No`: nhánh quyết định.
@@ -13,7 +18,7 @@ Kiến trúc hiện tại là **superloop**, chưa có FreeRTOS task/queue/mutex
 ứng dụng. Các tên `service...()` bên dưới biểu diễn hàm hoặc state machine được
 gọi tuần tự. FreeRTOS chỉ là phương án nâng cấp về sau.
 
-## 2. Luồng tổng thể một chu kỳ
+## 3.4.2 Luồng tổng thể của một chu kỳ đo
 
 ```text
 [Node] RTC đánh thức ESP32
@@ -39,7 +44,7 @@ gọi tuần tự. FreeRTOS chỉ là phương án nâng cấp về sau.
 → Vào deep sleep
 ```
 
-## 3. Luồng khởi động Node
+## 3.4.3 Khởi tạo và đánh thức node
 
 ```text
 Node wake-up/reset
@@ -59,7 +64,7 @@ Node wake-up/reset
   No  → Đặt RF error → chuẩn bị fallback sleep
 ```
 
-## 4. Luồng đọc cảm biến độ ẩm đất
+## 3.4.4 Xử lý cảm biến độ ẩm đất
 
 ```text
 [Superloop/serviceSoil] Bắt đầu chu kỳ Soil
@@ -98,7 +103,7 @@ No
       → Trả SoilData lỗi về biến trạng thái của chu kỳ Node
 ```
 
-## 5. Luồng đọc MPU6050
+## 3.4.5 Xử lý cảm biến MPU6050
 
 ```text
 [Superloop/serviceMpu] Đọc mẫu gia tốc đầu tiên
@@ -147,7 +152,7 @@ Yes
       → Trả MPUData về biến trạng thái của chu kỳ Node
 ```
 
-## 6. Luồng hợp nhất và kiểm tra dữ liệu Node
+## 3.4.6 Hợp nhất và kiểm tra dữ liệu tại node
 
 ```text
 [Superloop/buildSensorSnapshot] Nhận SoilData
@@ -167,7 +172,7 @@ Yes
 → Chuyển snapshot sang bước xử lý radio của cùng superloop
 ```
 
-## 7. Luồng truyền Node → Gateway
+## 3.4.7 Truyền dữ liệu từ node đến gateway
 
 ```text
 [Superloop/serviceNodeRadio] Nhận SensorSnapshot
@@ -194,7 +199,7 @@ Yes
       → Kết thúc transmission
 ```
 
-## 8. Luồng nhận và xử lý tại Gateway
+## 3.4.8 Tiếp nhận và xử lý packet tại gateway
 
 ```text
 [Superloop/serviceGatewayRadio] Kiểm tra LoRa RX
@@ -239,7 +244,7 @@ Duplicate = No
 → Đưa snapshot vào Analysis flow
 ```
 
-## 9. Luồng phân tích địa kỹ thuật
+## 3.4.9 Tính toán các chỉ số địa kỹ thuật
 
 ```text
 [Superloop/processAnalysis] Nhận SensorData
@@ -277,7 +282,7 @@ Yes
 → Chuyển sang phân loại cảnh báo
 ```
 
-## 10. Luồng phân loại cảnh báo
+## 3.4.10 Phân loại trạng thái cảnh báo
 
 ```text
 Nhận FS + DI + epsilon_star + analysis_valid
@@ -313,7 +318,7 @@ No
 → Chuyển sang Adaptive Duty Cycle
 ```
 
-## 11. Luồng Adaptive Duty Cycle
+## 3.4.11 Điều chỉnh chu kỳ hoạt động thích nghi
 
 ```text
 [AdaptiveDutyCycle] Nhận H_soil + beta + beta_dot + A_rms
@@ -369,7 +374,7 @@ Sleep_Duration đã được quyết định?
 → Node gọi esp_deep_sleep_start()
 ```
 
-## 12. Luồng ACK từ Gateway về Node
+## 3.4.12 Phản hồi ACK từ gateway về node
 
 ```text
 [Superloop/processGatewayPacket] Hoàn thành validation + analysis + duty cycle
@@ -390,7 +395,7 @@ ACK được gửi trước thao tác MQTT có thể block
 → Node không retry packet không cần thiết
 ```
 
-## 13. Luồng publish ThingsBoard
+## 3.4.13 Gửi dữ liệu lên ThingsBoard
 
 ```text
 [Superloop/serviceNetwork] Nhận processed telemetry
@@ -421,7 +426,7 @@ Identity
 → Original sample timestamp
 ```
 
-## 14. Luồng phục hồi dữ liệu offline
+## 3.4.14 Phục hồi dữ liệu khi mất kết nối
 
 ```text
 Wi-Fi/MQTT chuyển từ OFFLINE sang CONNECTED
@@ -435,7 +440,7 @@ Wi-Fi/MQTT chuyển từ OFFLINE sang CONNECTED
         No  → Chuyển Cloud_Status = ONLINE
 ```
 
-## 15. Luồng command Gateway → Node
+## 3.4.15 Truyền lệnh điều khiển từ gateway về node
 
 ```text
 [Cloud/User] Tạo command
@@ -473,9 +478,9 @@ Node xử lý command:
 Lưu ý: node deep sleep không thể nhận command liên tục. Command phải chờ cửa sổ
 node thức, hoặc thiết kế thêm cơ chế đánh thức ngoài; đây là ràng buộc hệ thống.
 
-## 16. Luồng Superloop hiện tại và hướng nâng cấp
+## 3.4.16 Cấu trúc superloop và hướng nâng cấp
 
-### 16.1 Node hiện tại
+### 3.4.16.1 Superloop tại node
 
 ```text
 setup()
@@ -495,7 +500,7 @@ setup()
 Node xử lý một chu kỳ tuần tự rồi ngủ. Chưa có SoilTask, MpuTask,
 NodeControlTask hoặc NodeRadioTask.
 
-### 16.2 Gateway hiện tại
+### 3.4.16.2 Superloop tại gateway
 
 ```text
 setup()
@@ -513,14 +518,14 @@ setup()
 Mỗi service phải chạy ngắn và trả quyền điều khiển về `loop()`. Gateway chưa
 có GatewayRadioTask, GatewayProcessingTask, GatewayNetworkTask hoặc queue RTOS.
 
-### 16.3 FreeRTOS sau này
+### 3.4.16.3 Hướng chuyển đổi sang FreeRTOS
 
 Chỉ chuyển sang FreeRTOS sau khi superloop đã đúng chức năng và có bằng chứng
 timing cho thấy cần chạy độc lập. Khi đó có thể tách Soil, MPU, radio, analysis
 và network thành task/queue. Đây là kế hoạch tương lai, không phải yêu cầu code
 ở giai đoạn hiện tại.
 
-## 17. Luồng Serial quan sát hệ thống
+## 3.4.17 Quan sát trạng thái qua Serial
 
 ```text
 Gateway boot
@@ -538,7 +543,7 @@ Gateway boot
 Serial không được thay thế database và không được làm block superloop đủ lâu để
 bỏ lỡ radio hoặc làm gián đoạn network service.
 
-## 18. Điều kiện hoàn thành một chu kỳ
+## 3.4.18 Điều kiện hoàn thành một chu kỳ
 
 Một chu kỳ được coi là hoàn thành khi:
 
@@ -561,3 +566,12 @@ Validation hoàn tất
 → ACK được gửi
 → Telemetry được publish hoặc lưu offline buffer
 ```
+
+## 3.4.19 Kết luận mục
+
+Luồng hoạt động được tổ chức theo kiến trúc superloop, trong đó các bước đọc
+cảm biến, xử lý dữ liệu, truyền LoRa, phản hồi ACK và duy trì kết nối mạng được
+thực hiện tuần tự theo trạng thái. Cách tổ chức này phù hợp với giai đoạn đầu
+của đồ án vì dễ kiểm tra và truy vết. Sau khi thuật toán ổn định, hệ thống có
+thể được chuyển sang FreeRTOS nếu kết quả đo timing cho thấy superloop không
+đáp ứng yêu cầu lấy mẫu hoặc truyền thông.

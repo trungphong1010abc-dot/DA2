@@ -9,10 +9,6 @@ Các giá trị trong bảng hiện là **ngưỡng thiết kế ban đầu** l�
 `Code.pdf` và cấu hình mô hình. Chúng chưa thay thế kết quả hiệu chuẩn cảm biến
 hoặc thí nghiệm trên loại đất thực tế.
 
-Riêng cảm biến độ ẩm đã có hai điểm hiệu chuẩn do người dùng cung cấp:
-`ADC_wet = 1200`, `ADC_dry = 3400`. Nguồn và cách lựa chọn các tham số mô hình
-được giải thích trong mục 9 của `README/DESIGN_RULES.md`.
-
 ## Bảng 3.2
 
 | STT | Đại lượng | Ký hiệu/key | Đơn vị | Bình thường | Cảnh báo | Nguy hiểm/lỗi | Vai trò trong hệ thống | Trạng thái ngưỡng |
@@ -173,8 +169,6 @@ hiệu chuẩn cuối cùng:
 | --- | ---: | --- | --- |
 | `ADC_min` | 100 | count | Miền kiểm tra phần cứng hiện tại |
 | `ADC_max` | 4090 | count | Miền kiểm tra phần cứng hiện tại |
-| `ADC_wet` | 1200 | count | Đã hiệu chuẩn theo thông tin người dùng cung cấp |
-| `ADC_dry` | 3400 | count | Đã hiệu chuẩn theo thông tin người dùng cung cấp |
 | `H_c` | 65 | % | Ngưỡng bắt đầu tăng áp lực nước lỗ rỗng |
 | `H_sat` | 95 | % | Ngưỡng gần bão hòa |
 | `u_max` | 12 | kPa | Hệ số mô hình cần fit thực nghiệm |
@@ -191,27 +185,11 @@ hiệu chuẩn cuối cùng:
 | `V_bat_low` | 3.5 | V | Phụ thuộc loại pin và tải |
 | `V_bat_critical` | 3.3 | V | Phụ thuộc loại pin và tải |
 
-Các giá trị `gamma=18 kN/m³`, `z=1 m`, `c'=5 kPa`, `phi'=28°`, `H_c=65%`,
-`H_sat=95%`, `u_max=12 kPa`, `beta_dot_crit=3 độ/giờ`, `A_crit=0.08 g` và
-trọng số `0.55/0.45` hiện là giả định mô hình. Chúng không phải kết quả đo của
-mẫu đất DA2.
-
-| Nhóm tham số | Nguồn phải dùng để chốt | Trạng thái hiện tại |
-| --- | --- | --- |
-| `ADC_wet`, `ADC_dry` | Hiệu chuẩn chính cảm biến đang sử dụng | Đã đo: 1200 và 3400 |
-| `gamma` | Thí nghiệm density/unit weight trên mẫu đất | Giả định 18 kN/m³ |
-| `z` | Khảo sát địa tầng hoặc đo hình học mô hình | Giả định 1 m |
-| `c'`, `phi'` | Direct shear/triaxial trên đúng mẫu đất | Giả định 5 kPa và 28° |
-| `H_c`, `H_sat`, `u_max` | Fit từ `H_soil` và áp lực nước lỗ rỗng đo đồng thời | Chưa fit |
-| `beta_dot_crit`, `A_crit` | Thử nghiệm ổn định/nguy hiểm có gắn nhãn | Chưa xác nhận |
-| `w1`, `w2` | Chuyên gia hoặc tối ưu trên dữ liệu có nhãn | Giả định 0.55/0.45 |
-
 ## Yêu cầu hiệu chuẩn trước khi chốt bảng
 
 Trước khi dùng Bảng 3.2 làm ngưỡng chính thức trong báo cáo và firmware, cần:
 
-1. Ghi đầy đủ metadata cho kết quả đã đo `ADC_dry=3400`, `ADC_wet=1200` và
-   kiểm tra lặp lại khi đổi cảm biến, nguồn cấp hoặc loại đất.
+1. Đo `ADC_dry` và `ADC_wet` cho đúng cảm biến và loại đất.
 2. Thu thập quan hệ giữa `H_soil` và áp lực nước lỗ rỗng để fit `H_c`, `H_sat`
    và `u_max`.
 3. Đo nhiễu nền của MPU6050 khi đất ổn định để xác định `A_crit`.
@@ -229,3 +207,4 @@ Khi đưa bảng vào báo cáo, cần ghi rõ:
 > đến cảm biến, rung động, tốc độ thay đổi góc, áp lực nước lỗ rỗng và đặc tính
 > cơ học đất cần được hiệu chỉnh bằng dữ liệu thực nghiệm trước khi sử dụng cho
 > đánh giá ngoài hiện trường.
+

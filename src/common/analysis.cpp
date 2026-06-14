@@ -26,26 +26,39 @@ float calcDynamicIndex(const Protocol::SensorPacket &data) {
 
 void applyAdaptiveDutyCycle(Result &result, const Protocol::SensorPacket &data) {
   result.batteryStatus = "NORMAL";
+  result.otaSupported = Config::OTA_SUPPORTED;
   result.otaLocked = false;
 
-  if ((data.errorFlags & (Protocol::ERR_SOIL | Protocol::ERR_MPU)) != 0) {
+  const bool batteryReadingInvalid = !isfinite(data.batteryV) ||
+                                     data.batteryV > Config::BATTERY_SANITY_MAX_V ||
+                                     data.batteryV <= 0.1f;
+
+  if ((data.errorFlags & (Protocol::ERR_SOIL | Protocol::ERR_MPU |
+                          Protocol::ERR_DATA_RANGE | Protocol::ERR_CONFIG)) != 0) {
     result.dutyCycleMode = "SENSOR_ERROR";
+    result.nextSleepSeconds = Config::SLEEP_SENSOR_ERROR_SEC;
+    return;
+  }
+
+  if (batteryReadingInvalid) {
+    result.batteryStatus = "INVALID";
+    result.dutyCycleMode = "BATTERY_DATA_INVALID";
     result.nextSleepSeconds = Config::SLEEP_SENSOR_ERROR_SEC;
     return;
   }
 
   if (data.batteryV > 0.1f && data.batteryV < Config::BATTERY_CRITICAL_V) {
     result.batteryStatus = "CRITICAL";
-    result.otaLocked = true;
-    result.dutyCycleMode = "BATTERY_CRITICAL";
+    result.otaLocked = Config::OTA_SUPPORTED;
+    result.dutyCycleMode = "BATTERY_CRITICAL_PROVISIONAL";
     result.nextSleepSeconds = Config::SLEEP_SENSOR_ERROR_SEC;
     return;
   }
 
   if (data.batteryV > 0.1f && data.batteryV < Config::BATTERY_LOW_V) {
     result.batteryStatus = "LOW";
-    result.otaLocked = true;
-    result.dutyCycleMode = "BATTERY_LOW";
+    result.otaLocked = Config::OTA_SUPPORTED;
+    result.dutyCycleMode = "BATTERY_LOW_PROVISIONAL";
     result.nextSleepSeconds = Config::SLEEP_WARNING_SEC;
     return;
   }
@@ -69,6 +82,10 @@ void applyAdaptiveDutyCycle(Result &result, const Protocol::SensorPacket &data) 
 Result evaluate(const Protocol::SensorPacket &data) {
   Result result;
 
+  const bool sensorDataValid =
+      (data.errorFlags & (Protocol::ERR_SOIL | Protocol::ERR_MPU |
+                          Protocol::ERR_DATA_RANGE | Protocol::ERR_CONFIG)) == 0;
+
   const float betaRad = degToRad(data.betaDeg);
   const float phiRad = degToRad(Config::SOIL_FRICTION_ANGLE_DEG);
   const float gammaZ = Config::SOIL_GAMMA_KN_M3 * Config::SLIP_LAYER_DEPTH_M;
@@ -80,19 +97,28 @@ Result evaluate(const Protocol::SensorPacket &data) {
   result.shearStrengthKpa = Config::SOIL_COHESION_KPA +
                             result.sigmaEffectiveKpa * tanf(phiRad);
 
-  result.valid = isfinite(result.tauDriveKpa) && fabsf(result.tauDriveKpa) > 0.001f;
+  result.valid = sensorDataValid && isfinite(result.tauDriveKpa) &&
+                 isfinite(result.sigmaNormalKpa) && isfinite(result.sigmaEffectiveKpa) &&
+                 isfinite(result.shearStrengthKpa) && fabsf(result.tauDriveKpa) > 0.001f;
   if (result.valid) {
     result.factorOfSafety = result.shearStrengthKpa / result.tauDriveKpa;
-    result.strainIndex = 1.0f / result.factorOfSafety;
+    if (isfinite(result.factorOfSafety) && fabsf(result.factorOfSafety) > 0.0001f) {
+      result.strainIndex = 1.0f / result.factorOfSafety;
+    }
     result.valid = isfinite(result.factorOfSafety) && isfinite(result.strainIndex);
   }
 
-  result.dynamicIndex = calcDynamicIndex(data);
+  result.dynamicIndex = sensorDataValid ? calcDynamicIndex(data) : NAN;
 
-  if ((data.errorFlags & (Protocol::ERR_SOIL | Protocol::ERR_MPU)) != 0) {
+  if (!sensorDataValid) {
     result.alertLevel = "WARNING";
     result.riskStatus = "SENSOR_ERROR";
-    result.warningMessage = "Loi cam bien, dung gia tri gan nhat can kiem tra";
+    result.warningMessage = "Du lieu cam bien khong hop le, can kiem tra";
+  } else if (!isfinite(data.batteryV) || data.batteryV > Config::BATTERY_SANITY_MAX_V ||
+             data.batteryV <= 0.1f) {
+    result.alertLevel = "WARNING";
+    result.riskStatus = "BATTERY_DATA_INVALID";
+    result.warningMessage = "Dien ap pin ngoai mien hop le";
   } else if (data.batteryV > 0.1f && data.batteryV < Config::BATTERY_CRITICAL_V) {
     result.alertLevel = "DANGER";
     result.riskStatus = "BATTERY_CRITICAL";
@@ -133,6 +159,12 @@ const char *errorFlagsToText(uint16_t flags) {
   }
   if ((flags & Protocol::ERR_PACKET) != 0) {
     return "PACKET";
+  }
+  if ((flags & Protocol::ERR_CONFIG) != 0) {
+    return "CONFIG";
+  }
+  if ((flags & Protocol::ERR_DATA_RANGE) != 0) {
+    return "DATA_RANGE";
   }
   if ((flags & Protocol::ERR_LORA) != 0) {
     return "LORA";

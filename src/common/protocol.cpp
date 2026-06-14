@@ -2,6 +2,9 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
+#include <ctype.h>
+#include <math.h>
 
 namespace Protocol {
 
@@ -12,11 +15,16 @@ String floatField(float value, uint8_t decimals) {
 }
 
 bool parseUint8(const String &value, uint8_t &out) {
-  if (value.length() == 0) {
+  if (value.length() == 0 || value[0] == '-') {
     return false;
   }
-  const long parsed = value.toInt();
-  if (parsed < 0 || parsed > 255) {
+  char *end = nullptr;
+  errno = 0;
+  const unsigned long parsed = strtoul(value.c_str(), &end, 10);
+  if (errno != 0 || end == value.c_str() || *end != '\0') {
+    return false;
+  }
+  if (parsed > 255) {
     return false;
   }
   out = static_cast<uint8_t>(parsed);
@@ -24,11 +32,16 @@ bool parseUint8(const String &value, uint8_t &out) {
 }
 
 bool parseUint16(const String &value, uint16_t &out) {
-  if (value.length() == 0) {
+  if (value.length() == 0 || value[0] == '-') {
     return false;
   }
-  const long parsed = value.toInt();
-  if (parsed < 0 || parsed > 65535) {
+  char *end = nullptr;
+  errno = 0;
+  const unsigned long parsed = strtoul(value.c_str(), &end, 10);
+  if (errno != 0 || end == value.c_str() || *end != '\0') {
+    return false;
+  }
+  if (parsed > 65535) {
     return false;
   }
   out = static_cast<uint16_t>(parsed);
@@ -36,10 +49,44 @@ bool parseUint16(const String &value, uint16_t &out) {
 }
 
 bool parseUint32(const String &value, uint32_t &out) {
+  if (value.length() == 0 || value[0] == '-') {
+    return false;
+  }
+  char *end = nullptr;
+  errno = 0;
+  const unsigned long parsed = strtoul(value.c_str(), &end, 10);
+  if (errno != 0 || end == value.c_str() || *end != '\0') {
+    return false;
+  }
+  out = static_cast<uint32_t>(parsed);
+  return true;
+}
+
+bool parseInt(const String &value, int &out) {
   if (value.length() == 0) {
     return false;
   }
-  out = static_cast<uint32_t>(strtoul(value.c_str(), nullptr, 10));
+  char *end = nullptr;
+  errno = 0;
+  const long parsed = strtol(value.c_str(), &end, 10);
+  if (errno != 0 || end == value.c_str() || *end != '\0') {
+    return false;
+  }
+  out = static_cast<int>(parsed);
+  return true;
+}
+
+bool parseFloat(const String &value, float &out) {
+  if (value.length() == 0) {
+    return false;
+  }
+  char *end = nullptr;
+  errno = 0;
+  const float parsed = strtof(value.c_str(), &end);
+  if (errno != 0 || end == value.c_str() || *end != '\0' || !isfinite(parsed)) {
+    return false;
+  }
+  out = parsed;
   return true;
 }
 
@@ -102,6 +149,11 @@ bool validatePacket(const String &packet) {
   }
 
   const String crcText = packet.substring(crcIndex + 5);
+  for (size_t i = 0; i < crcText.length(); ++i) {
+    if (!isxdigit(static_cast<unsigned char>(crcText[i]))) {
+      return false;
+    }
+  }
   const uint16_t expected = static_cast<uint16_t>(strtoul(crcText.c_str(), nullptr, 16));
   const uint16_t actual = crc16Ccitt(packet.substring(0, crcIndex));
   return expected == actual;
@@ -173,14 +225,14 @@ bool parseDataPacket(const String &packet, SensorPacket &data) {
   ok &= parseUint8(getField(packet, "node"), data.nodeId);
   ok &= parseUint32(getField(packet, "pid"), data.packetId);
   ok &= parseUint32(getField(packet, "ts"), data.timestampMs);
-  data.soilAdc = getField(packet, "adc").toInt();
-  data.soilPercent = getField(packet, "hs").toFloat();
-  data.betaDeg = getField(packet, "beta").toFloat();
-  data.betaDotDegPerHour = getField(packet, "bdot").toFloat();
-  data.vibrationRmsG = getField(packet, "arms").toFloat();
-  data.pitchDeg = getField(packet, "pitch").toFloat();
-  data.rollDeg = getField(packet, "roll").toFloat();
-  data.batteryV = getField(packet, "vbat").toFloat();
+  ok &= parseInt(getField(packet, "adc"), data.soilAdc);
+  ok &= parseFloat(getField(packet, "hs"), data.soilPercent);
+  ok &= parseFloat(getField(packet, "beta"), data.betaDeg);
+  ok &= parseFloat(getField(packet, "bdot"), data.betaDotDegPerHour);
+  ok &= parseFloat(getField(packet, "arms"), data.vibrationRmsG);
+  ok &= parseFloat(getField(packet, "pitch"), data.pitchDeg);
+  ok &= parseFloat(getField(packet, "roll"), data.rollDeg);
+  ok &= parseFloat(getField(packet, "vbat"), data.batteryV);
   ok &= parseUint16(getField(packet, "err"), err);
   data.errorFlags = err;
   return ok;
