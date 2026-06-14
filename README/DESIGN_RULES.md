@@ -4,7 +4,7 @@
 
 Tài liệu này là đặc tả thiết kế bắt buộc cho hệ thống IoT giám sát độ ẩm,
 độ nghiêng, rung động và nguy cơ mất ổn định của đất. Mọi thay đổi firmware,
-giao thức LoRa, xử lý dữ liệu, ThingsBoard và FreeRTOS phải được đối chiếu với
+giao thức LoRa, xử lý dữ liệu, ThingsBoard và kiến trúc thực thi phải được đối chiếu với
 tài liệu này trước khi triển khai.
 
 Nguồn yêu cầu:
@@ -16,9 +16,15 @@ Nguồn yêu cầu:
 - Flowchart Gateway → ThingsBoard IoT Application.
 - Flowchart Adaptive Duty Cycle.
 - Tài liệu `C:\Users\Public\Code.pdf`.
+- Tài liệu `C:\Users\Public\New Section 1.pdf`.
 
 Tài liệu này mô tả thiết kế mục tiêu. Nó không khẳng định firmware hiện tại đã
 hoàn thành toàn bộ chức năng được nêu.
+
+Kiến trúc thực thi giai đoạn hiện tại là **superloop tuần tự** dựa trên
+`setup()` và `loop()`. Chưa thiết kế hoặc triển khai các FreeRTOS task, queue,
+mutex hay cơ chế chạy song song ở tầng ứng dụng. FreeRTOS chỉ là hướng nâng cấp
+sau khi superloop đã ổn định và được kiểm thử đầy đủ.
 
 ## 2. Nguyên tắc ưu tiên
 
@@ -146,14 +152,22 @@ H_soil(%) = (ADC_dry - ADC_filtered) × 100 / (ADC_dry - ADC_wet)
 
 Quy tắc:
 
-- `ADC_dry` và `ADC_wet` phải được hiệu chuẩn theo cảm biến và loại đất.
+- Giá trị hiệu chuẩn hiện tại đã được người dùng cung cấp:
+
+```text
+ADC_dry = 3400
+ADC_wet = 1200
+```
+
+- Hai giá trị trên chỉ áp dụng cho đúng cảm biến và điều kiện hiệu chuẩn tương
+  ứng; thay cảm biến/điện áp/loại đất phải đánh giá lại.
 - Sau tính toán mới giới hạn `H_soil` vào 0–100%.
 - Lưu cả `soil_adc_filtered` và `h_soil`.
 - Khi mẫu lỗi, không tái sử dụng âm thầm giá trị cũ như dữ liệu mới.
 
 ### 4.5 Kết quả SoilData
 
-Soil task phải trả tối thiểu:
+Hàm/khối xử lý Soil phải trả tối thiểu:
 
 ```text
 soil_adc_filtered, h_soil, soil_status, error_flag, timestamp_ms
@@ -230,7 +244,7 @@ Không gọi độ lớn rung của một mẫu duy nhất là RMS.
 
 ### 5.7 Kết quả MPUData
 
-MPU task phải trả tối thiểu:
+Hàm/khối xử lý MPU phải trả tối thiểu:
 
 ```text
 beta_deg, beta_dot_deg_per_hour, a_rms_g,
@@ -314,8 +328,9 @@ Quy tắc:
 - Node gửi ACK command gồm `node_id`, `packet_id`, `status`, `CRC`.
 - Gateway retry có giới hạn và công bố trạng thái `COMMAND_SUCCESS` hoặc
   `COMMAND_FAILED`.
-- Command và telemetry dùng chung radio phải được điều phối bằng mutex/state
-  machine; không TX khi một luồng khác đang RX/TX.
+- Command và telemetry dùng chung radio phải được điều phối bằng một radio
+  state machine trong superloop; không TX command khi radio đang chờ ACK hoặc
+  xử lý packet dữ liệu.
 
 ## 9. Mô hình phân tích địa kỹ thuật
 
@@ -328,6 +343,22 @@ u = u_max × max(0, (H_soil - H_c) / (H_sat - H_c))
 - `H_soil`, `H_c`, `H_sat` phải cùng cách biểu diễn: cùng là % hoặc cùng 0–1.
 - Không tự chặn phía trên nếu công thức thiết kế chỉ yêu cầu `max(0, ...)`.
 - Nếu muốn giới hạn `u <= u_max`, phải cập nhật đặc tả và nêu lý do vật lý.
+- `H_c=65%`, `H_sat=95%`, `u_max=12 kPa` hiện là giả định thiết kế, chưa được
+  fit bằng phép đo áp lực nước lỗ rỗng.
+
+Nguồn và cách lựa chọn:
+
+- `H_c` phải lấy từ điểm mà áp lực nước lỗ rỗng đo tham chiếu bắt đầu rời khỏi
+  vùng nhiễu gần 0 khi tăng độ ẩm.
+- `H_sat` phải được xác định tại trạng thái mẫu gần bão hòa bằng phương pháp
+  tham chiếu. Chỉ số `H_soil=95%` không đồng nghĩa độ bão hòa vật lý 95%.
+- `u_max` phải lấy từ piezometer/cảm biến áp lực nước lỗ rỗng đo đồng thời với
+  `H_soil`; không thể suy ra `u_max` từ `ADC_wet` và `ADC_dry`.
+- Quy trình fit: giữ cố định loại đất, độ chặt và hình học → tăng nước theo từng
+  mức → chờ ổn định → ghi `ADC_filtered`, `H_soil`, `u_reference` → lặp nhiều
+  chu kỳ → fit `H_c`, `H_sat`, `u_max` → đánh giá RMSE/MAE.
+- Nếu chưa có `u_reference`, kết quả `u` và FS phải mang nhãn
+  `MODEL_PROVISIONAL` và chỉ được mô tả là mô phỏng.
 
 ### 9.2 Mô hình mái dốc vô hạn
 
@@ -345,6 +376,30 @@ Quy tắc:
 - `gamma` dùng kN/m³ và `z` dùng m để kết quả ứng suất là kPa.
 - Không tự ép `sigma_effective` âm thành 0 nếu đặc tả chưa yêu cầu.
 - Nếu `tau` bằng hoặc quá gần 0, `FS` không hợp lệ; không thay bằng 99.
+- `gamma=18 kN/m³`, `z=1 m`, `c'=5 kPa`, `phi'=28°` hiện là bộ tham số mô
+  phỏng ban đầu, không phải kết quả thí nghiệm của mẫu đất.
+
+Nguồn và cách lựa chọn:
+
+- `gamma`: đo density/unit weight trên mẫu đất đại diện rồi tính
+  `gamma = rho × g`. Có thể tham khảo ASTM D7263. Giá trị 18 kN/m³ hiện là giả
+  định, không phải kết quả mẫu đất DA2.
+- `z`: lấy từ khảo sát địa tầng, hố đào, khoan, mặt phân lớp hoặc đo hình học
+  mô hình. MPU6050 không đo được chiều sâu lớp trượt. Nếu chưa chắc chắn, phải
+  tính sensitivity với nhiều giá trị `z`.
+- `c'` và `phi'`: lấy từ direct shear drained hoặc triaxial phù hợp trên đúng
+  mẫu đất. ASTM D3080/D3080M dùng direct shear consolidated drained. Fit:
+
+```text
+tau_failure = c' + sigma_effective × tan(phi')
+c' = giao điểm trục tau
+phi' = atan(độ dốc đường fit)
+```
+
+- ASTM D4767 có thể tham khảo cho triaxial đất dính; lựa chọn điều kiện và diễn
+  giải tham số phải do người có chuyên môn địa kỹ thuật quyết định.
+- `beta`: lấy từ góc hình học mái dốc hoặc MPU6050 đã hiệu chuẩn trục và gá cứng.
+  Phải phân biệt góc dốc nền với phần thay đổi góc của khối cảm biến.
 
 ### 9.3 Chỉ số động học
 
@@ -356,6 +411,20 @@ DI = w1 × abs(beta_dot / beta_dot_crit)
 - Công bố `w1`, `w2`, `beta_dot_crit`, `A_crit` trong cấu hình.
 - `beta_dot` và `beta_dot_crit` phải cùng đơn vị.
 - Nếu `A_rms` không âm theo định nghĩa, không cần lấy trị tuyệt đối.
+- `beta_dot_crit=3 độ/giờ`, `A_crit=0.08 g`, `w1=0.55`, `w2=0.45` là giả
+  định thiết kế hiện tại; phải được kiểm chứng bằng dữ liệu có nhãn.
+
+Nguồn và cách lựa chọn:
+
+- `beta_dot_crit`: đo noise/drift khi đứng yên và đo các thử nghiệm ổn định,
+  bắt đầu dịch chuyển, nguy hiểm; chọn ngưỡng theo false alarm và missed
+  detection. Giá trị 3 độ/giờ hiện chưa có dữ liệu chứng minh.
+- `A_crit`: đo `A_rms` nền sau khi gắn MPU6050, các nguồn rung môi trường bình
+  thường và các thử nghiệm dịch chuyển có nhãn. Datasheet MPU6050 không cung
+  cấp ngưỡng rung gây sạt lở. Giá trị 0.08 g hiện là giả định.
+- `w1`, `w2` phải không âm và có tổng bằng 1. Có thể chọn bằng chuyên gia khi
+  chưa có dữ liệu, nhưng tốt hơn là tối ưu trên tập dữ liệu có nhãn và kiểm tra
+  sensitivity. Cặp 0.55/0.45 chỉ biểu thị ưu tiên nhẹ cho tốc độ nghiêng.
 
 ### 9.4 Độ giãn tương đối quy ước
 
@@ -365,7 +434,40 @@ epsilon_star = 1 / FS
 
 Nếu `FS` không hợp lệ hoặc bằng 0, `epsilon_star` cũng không hợp lệ.
 
-### 9.5 Phân loại cảnh báo
+`epsilon_star` không phải strain vật lý đo bằng strain gauge. Nếu các tham số
+tạo FS còn là giả định thì `epsilon_star` cũng chỉ là chỉ số mô phỏng.
+
+### 9.5 Trạng thái nguồn tham số
+
+| Loại nguồn | Ý nghĩa |
+| --- | --- |
+| `MEASURED_SENSOR` | Đã đo/hiệu chuẩn trên cảm biến đang dùng |
+| `LAB_TEST` | Kết quả thí nghiệm mẫu đất |
+| `SITE_SURVEY` | Đo hình học hoặc khảo sát hiện trường/mô hình |
+| `DATASHEET` | Lấy từ datasheet thiết bị |
+| `LITERATURE` | Khoảng tham khảo từ tiêu chuẩn/tài liệu |
+| `EMPIRICAL_FIT` | Fit từ dữ liệu thực nghiệm |
+| `DESIGN_ASSUMPTION` | Giả định tạm để mô phỏng |
+
+Mỗi tham số phải có giá trị, đơn vị, loại nguồn, phương pháp, mẫu đất, ngày đo,
+thiết bị, số lần lặp và sai số. Hiện chỉ `ADC_wet=1200` và `ADC_dry=3400` được
+xác nhận là `MEASURED_SENSOR` theo thông tin người dùng cung cấp.
+
+Tài liệu phương pháp tham khảo:
+
+- ASTM D7263-21, xác định density và unit weight của mẫu đất:
+  <https://store.astm.org/d7263-21.html>
+- ASTM D3080/D3080M-23, direct shear consolidated drained:
+  <https://store.astm.org/d3080_d3080m-23.html>
+- ASTM D4767-11(2020), triaxial compression cho đất dính:
+  <https://store.astm.org/d4767-11r20.html>
+- TDK InvenSense MPU-6050, dùng làm nguồn đặc tính cảm biến, không phải nguồn
+  ngưỡng sạt lở:
+  <https://invensense.tdk.com/en-us/products/motion-tracking/6-axis/mpu-6050/>
+- `Code.pdf` và `New Section 1.pdf` giải thích flow/công thức, nhưng không phải
+  hồ sơ thí nghiệm xác nhận bộ tham số đất.
+
+### 9.6 Phân loại cảnh báo
 
 **DANGER** khi có ít nhất một điều kiện:
 
@@ -476,34 +578,67 @@ Mỗi packet mới phải có ba nhóm log:
 Log mạng chỉ cần trạng thái chuyển tiếp có ý nghĩa: Wi-Fi connected/failed,
 MQTT connected/failed, publish OK/FAILED. Không in danh sách Wi-Fi định kỳ.
 
-## 12. Quy tắc FreeRTOS
+## 12. Quy tắc kiến trúc Superloop hiện tại
 
-### 12.1 Phân chia trách nhiệm đề xuất
+### 12.1 Mô hình thực thi
 
-- `SoilTask`: đọc, retry, median filter và tạo SoilData.
-- `MpuTask`: lấy mẫu định kỳ, low-pass, tính góc và rung.
-- `NodeControlTask`: hợp nhất sensor data, validation và tạo packet.
-- `NodeRadioTask`: TX, chờ ACK, retry và command RX.
-- `GatewayRadioTask`: RX/TX LoRa và timestamp nhận.
-- `GatewayProcessingTask`: parse, validation, duplicate và analysis.
-- `GatewayNetworkTask`: Wi-Fi, MQTT, publish và offline retry.
-- `SerialTask`: log/command debug, không giữ radio hoặc network mutex lâu.
+- Firmware hiện tại dùng `setup()` để khởi tạo và `loop()` để điều phối.
+- Mọi chức năng ứng dụng chạy tuần tự; không có task ứng dụng chạy đồng thời.
+- Mỗi vòng `loop()` phải thực hiện các hàm dịch vụ ngắn, có trạng thái và quay
+  lại nhanh để các chức năng khác tiếp tục được phục vụ.
+- Các khối chức năng được tách thành hàm/module để sau này có thể chuyển sang
+  FreeRTOS mà không đổi công thức, packet hoặc contract dữ liệu.
 
-### 12.2 Queue và ownership
+Phân chia trách nhiệm logic trong superloop:
 
-- Truyền struct snapshot qua queue, không truyền con trỏ tới stack đã hết hạn.
-- Mỗi peripheral chỉ có một owner task hoặc một mutex bảo vệ rõ ràng.
-- LoRa SPI không được truy cập đồng thời từ ACK, telemetry RX và command TX.
-- MQTT client không được gọi đồng thời từ nhiều task.
-- Queue full phải tạo metric/log; không được drop packet im lặng.
+- `serviceSoil()`: đọc, retry, median filter và tạo SoilData.
+- `serviceMpu()`: lấy mẫu định kỳ, low-pass, tính góc và rung.
+- `buildSensorSnapshot()`: hợp nhất dữ liệu, validation và tạo packet.
+- `serviceNodeRadio()`: TX, chờ ACK, retry và command RX.
+- `serviceGatewayRadio()`: RX/TX LoRa và timestamp nhận.
+- `processGatewayPacket()`: parse, validation, duplicate và analysis.
+- `serviceNetwork()`: Wi-Fi, MQTT, publish và offline retry.
+- `serviceSerial()`: log và command debug.
 
-### 12.3 Timing
+Tên hàm cụ thể có thể khác, nhưng trách nhiệm không được trộn lẫn tùy tiện.
 
-- Không dùng vòng `while` block hàng chục giây trong task ưu tiên cao.
-- Dùng `vTaskDelayUntil` cho chu kỳ lấy mẫu ổn định.
-- Dùng timeout hữu hạn khi chờ queue, mutex, ACK và network.
+### 12.2 State machine và ownership
+
+- LoRa chỉ được điều khiển tại một điểm trong superloop hoặc qua một API radio
+  duy nhất.
+- Radio state phải phân biệt tối thiểu: `IDLE`, `RX`, `TX_DATA`, `WAIT_ACK`,
+  `TX_ACK`, `TX_COMMAND`.
+- MQTT chỉ được gọi trong khối network service.
+- Dùng struct snapshot hoặc buffer có ownership rõ ràng giữa các bước xử lý.
+- Buffer đầy phải tạo metric/log; không được drop packet im lặng.
+- Không cần mutex trong superloop vì không có truy cập đồng thời. Nếu code bắt
+  đầu có callback/ISR sửa chung state, phải thiết kế vùng bảo vệ riêng.
+
+### 12.3 Timing không chặn
+
+- Không dùng vòng chờ dài làm dừng toàn bộ `loop()`.
+- Dùng `millis()` và state machine để quản lý sampling, timeout ACK, retry,
+  Wi-Fi reconnect và MQTT reconnect.
+- Chỉ cho phép delay ngắn tại bước phần cứng bắt buộc; mọi delay phải được ghi
+  rõ tác động tới khả năng nhận LoRa và phục vụ mạng.
+- Mỗi service function phải có timeout hữu hạn.
+- ACK được ưu tiên trước tác vụ MQTT có thể chậm.
 - Deep sleep chỉ bắt đầu sau khi log, ACK cần thiết và dữ liệu quan trọng đã
   được flush hoặc lưu.
+
+### 12.4 Kế hoạch chuyển sang FreeRTOS sau này
+
+FreeRTOS **chưa thuộc phạm vi triển khai hiện tại**. Chỉ bắt đầu migration khi:
+
+1. Superloop đã chạy đúng toàn bộ flow và có test biên.
+2. Timing thực tế chứng minh superloop không đáp ứng sampling/radio/network.
+3. Contract dữ liệu giữa Soil, MPU, radio, analysis và network đã ổn định.
+4. Có kế hoạch stack size, priority, queue depth và ownership peripheral.
+
+Khi migration, có thể tách thành Soil task, MPU task, radio task, processing
+task và network task. Việc chuyển đổi phải giữ nguyên công thức, telemetry key,
+packet format, ACK/retry và Adaptive Duty Cycle. Không được thêm task chỉ để
+đổi kiến trúc khi chưa có yêu cầu timing cụ thể.
 
 ## 13. Cấu hình và bảo mật
 
@@ -561,11 +696,10 @@ Các mục sau phải được chốt bằng tài liệu trước khi triển kh
 1. Sleep duration chính thức cho pin `< 3.3 V` và `< 3.5 V`.
 2. Đơn vị validation chính thức của `beta_dot` (`°/s` hay `°/h`).
 3. Cơ chế OTA thực tế và ý nghĩa kỹ thuật của `ota_locked`.
-4. Loại local storage: RTC RAM, RAM queue, NVS, LittleFS hay thẻ nhớ.
+4. Loại local storage: RTC RAM, RAM ring buffer, NVS, LittleFS hay thẻ nhớ.
 5. Dung lượng và chính sách tràn offline buffer.
 6. Đồng bộ UTC cho node và timestamp khi deep sleep.
 7. Lưu database nằm ở gateway, ThingsBoard hay backend riêng.
 8. Chính sách command khi node đang deep sleep.
 9. Cách hỗ trợ nhiều hơn 100 node và thời hạn lưu duplicate history.
 10. Ngưỡng ADC, pin và địa kỹ thuật sau hiệu chuẩn thực nghiệm.
-

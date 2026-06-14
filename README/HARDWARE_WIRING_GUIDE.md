@@ -53,7 +53,18 @@ GPIO34 là chân input-only ADC1. Firmware đọc ADC 12 bit, lọc median 11 m�
 
 `H_soil = (ADC_dry - ADC_filtered) * 100 / (ADC_dry - ADC_wet)`
 
-Cần hiệu chuẩn lại `SOIL_ADC_DRY` và `SOIL_ADC_WET` trong `src/common/project_config.h` theo đất và cảm biến thực tế.
+Kết quả hiệu chuẩn hiện tại do người dùng cung cấp:
+
+```text
+ADC_dry = 3400
+ADC_wet = 1200
+H_soil = (3400 - ADC_filtered) * 100 / 2200
+```
+
+Các giá trị này chưa được cập nhật vào code trong bước tài liệu hiện tại. Khi
+triển khai firmware, cần cập nhật `SOIL_ADC_DRY` và `SOIL_ADC_WET`. Hồ sơ hiệu
+chuẩn nên ghi ngày đo, cảm biến, điện áp cấp, loại đất, độ sâu cắm và thống kê
+các mẫu ADC tại hai trạng thái wet/dry.
 
 ### Mạch chia áp pin
 

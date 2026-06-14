@@ -5,16 +5,20 @@
 - `→`: hành động tiếp theo.
 - `Yes/No`: nhánh quyết định.
 - `[Node]`, `[Gateway]`, `[Cloud]`: nơi thực hiện hành động.
-- `||`: các công việc có thể chạy song song dưới FreeRTOS.
+- `[Superloop]`: các bước được điều phối tuần tự bằng `setup()` và `loop()`.
 - `Retry`: quay lại một bước trước với bộ đếm giới hạn.
 - `Stop cycle`: kết thúc chu kỳ hiện tại, không phải dừng toàn hệ thống.
+
+Kiến trúc hiện tại là **superloop**, chưa có FreeRTOS task/queue/mutex ở tầng
+ứng dụng. Các tên `service...()` bên dưới biểu diễn hàm hoặc state machine được
+gọi tuần tự. FreeRTOS chỉ là phương án nâng cấp về sau.
 
 ## 2. Luồng tổng thể một chu kỳ
 
 ```text
 [Node] RTC đánh thức ESP32
 → Khởi tạo nguồn cảm biến, ADC, I2C, MPU6050 và LoRa
-→ [SoilTask || MpuTask || Battery read] thu thập dữ liệu
+→ [Superloop] gọi lần lượt khối Soil, MPU và đọc pin
 → Hợp nhất snapshot cảm biến
 → Kiểm tra miền giá trị và tạo Error_Flag
 → Gán Node_ID, Gateway_ID, Packet_ID và timestamp
@@ -58,7 +62,7 @@ Node wake-up/reset
 ## 4. Luồng đọc cảm biến độ ẩm đất
 
 ```text
-[SoilTask] Bắt đầu chu kỳ Soil
+[Superloop/serviceSoil] Bắt đầu chu kỳ Soil
 → Cấp nguồn cảm biến nếu có chân điều khiển
 → Chờ ổn định 500–1000 ms
 → Đọc một mẫu ADC
@@ -75,10 +79,11 @@ Yes
 → Sắp xếp mẫu
 → Chọn median
 → Tạo soil_adc_filtered
-→ Tính H_soil = (ADC_dry - ADC_filtered) × 100 / (ADC_dry - ADC_wet)
+→ Dùng ADC_dry = 3400 và ADC_wet = 1200 đã hiệu chuẩn
+→ Tính H_soil = (3400 - ADC_filtered) × 100 / 2200
 → Giới hạn H_soil vào 0–100%
 → Đặt soil_status = OK
-→ Trả SoilData về NodeControlTask
+→ Trả SoilData về biến trạng thái của chu kỳ Node
 ```
 
 Nhánh không hợp lệ:
@@ -90,13 +95,13 @@ No
   No  → Chờ 300–500 ms → Retry đọc ADC
   Yes → Đặt SENSOR_ERROR + soil_status = ERROR
       → Bỏ mẫu hiện tại
-      → Trả SoilData lỗi về NodeControlTask
+      → Trả SoilData lỗi về biến trạng thái của chu kỳ Node
 ```
 
 ## 5. Luồng đọc MPU6050
 
 ```text
-[MpuTask] Đọc mẫu gia tốc đầu tiên
+[Superloop/serviceMpu] Đọc mẫu gia tốc đầu tiên
 → Khởi tạo Axf/Ayf/Azf bằng Ax_raw/Ay_raw/Az_raw
 → Lưu t_prev
 → Lấy t = monotonic clock
@@ -139,13 +144,13 @@ Yes
   Yes → Tính A_rms trên toàn cửa sổ
       → Tạo MPUData
       → Cập nhật beta_prev và filter state
-      → Trả MPUData về NodeControlTask
+      → Trả MPUData về biến trạng thái của chu kỳ Node
 ```
 
 ## 6. Luồng hợp nhất và kiểm tra dữ liệu Node
 
 ```text
-[NodeControlTask] Nhận SoilData
+[Superloop/buildSensorSnapshot] Nhận SoilData
 → Nhận MPUData
 → Đọc V_bat
 → Tạo SensorSnapshot
@@ -159,13 +164,13 @@ Yes
   No  → Error_Flag = 0
 → Tăng Packet_ID
 → Gắn timestamp_ms
-→ Chuyển snapshot sang NodeRadioTask
+→ Chuyển snapshot sang bước xử lý radio của cùng superloop
 ```
 
 ## 7. Luồng truyền Node → Gateway
 
 ```text
-[NodeRadioTask] Nhận SensorSnapshot
+[Superloop/serviceNodeRadio] Nhận SensorSnapshot
 → Đóng packet DATA
 → Gắn Header + Gateway_ID + Node_ID + Packet_ID
 → Gắn dữ liệu cảm biến + timestamp + Error_Flag
@@ -192,11 +197,11 @@ Yes
 ## 8. Luồng nhận và xử lý tại Gateway
 
 ```text
-[GatewayRadioTask] Chờ LoRa RX
+[Superloop/serviceGatewayRadio] Kiểm tra LoRa RX
 → Nhận packet
 → Đọc RSSI
-→ Đưa packet snapshot vào RX queue
-→ [GatewayProcessingTask] lấy packet từ queue
+→ Sao chép packet vào RX buffer
+→ Gọi bước `processGatewayPacket()` khi có packet hoàn chỉnh
 → Kiểm tra Header
 → Kiểm tra CRC
 → Kiểm tra Gateway_ID
@@ -237,7 +242,9 @@ Duplicate = No
 ## 9. Luồng phân tích địa kỹ thuật
 
 ```text
-[AnalysisTask] Nhận SensorData
+[Superloop/processAnalysis] Nhận SensorData
+→ Nạp bộ tham số mô hình kèm trạng thái nguồn/phiên bản
+→ Xác nhận gamma, z, c', phi', H_c, H_sat, u_max đang là MEASURED hay PROVISIONAL
 → Kiểm tra Error_Flag và miền đầu vào
 → Dữ liệu đủ để phân tích?
 ```
@@ -365,14 +372,14 @@ Sleep_Duration đã được quyết định?
 ## 12. Luồng ACK từ Gateway về Node
 
 ```text
-[GatewayProcessingTask] Hoàn thành validation + analysis + duty cycle
+[Superloop/processGatewayPacket] Hoàn thành validation + analysis + duty cycle
 → Tạo ACK gồm Gateway_ID + Node_ID + Packet_ID
 → Gắn Status + Alert_Level + Sleep_Duration
 → Tính CRC
-→ Lấy LoRa mutex
+→ Kiểm tra radio state đang sẵn sàng
 → Gửi ACK
 → Chuyển radio về receive
-→ Nhả LoRa mutex
+→ Chuyển radio state về receive
 ```
 
 Ưu tiên ACK:
@@ -386,7 +393,7 @@ ACK được gửi trước thao tác MQTT có thể block
 ## 13. Luồng publish ThingsBoard
 
 ```text
-[GatewayNetworkTask] Nhận processed telemetry
+[Superloop/serviceNetwork] Nhận processed telemetry
 → Wi-Fi connected?
   No  → Đưa telemetry vào Offline_Buffer
       → Đánh dấu Cloud_Status = OFFLINE
@@ -435,7 +442,7 @@ Wi-Fi/MQTT chuyển từ OFFLINE sang CONNECTED
 → Gateway nhận và lưu command
 → Kiểm tra Node_ID
 → Đóng packet CMD gồm Command + Parameter + Packet_ID + CRC
-→ Lấy LoRa mutex
+→ Chờ radio state sẵn sàng
 → Gửi command
 → Chờ ACK trong T_ACK
 → Có ACK?
@@ -452,7 +459,7 @@ Wi-Fi/MQTT chuyển từ OFFLINE sang CONNECTED
 Node xử lý command:
 
 ```text
-[NodeRadioTask] Nhận CMD
+[Superloop/serviceNodeRadio] Nhận CMD
 → Kiểm tra Header + CRC + Node_ID
 → Kiểm tra duplicate Packet_ID
 → Phân loại command
@@ -466,34 +473,52 @@ Node xử lý command:
 Lưu ý: node deep sleep không thể nhận command liên tục. Command phải chờ cửa sổ
 node thức, hoặc thiết kế thêm cơ chế đánh thức ngoài; đây là ràng buộc hệ thống.
 
-## 16. Luồng FreeRTOS mục tiêu
+## 16. Luồng Superloop hiện tại và hướng nâng cấp
 
-### 16.1 Node
-
-```text
-SoilTask ──SoilData──┐
-                     ├→ NodeControlTask → SensorSnapshot → NodeRadioTask
-MpuTask ───MPUData───┤                           ↓
-Battery read ────────┘                     ACK/Command
-                                                  ↓
-                                      AdaptiveDutyCycle
-                                                  ↓
-                                             Deep Sleep
-```
-
-### 16.2 Gateway
+### 16.1 Node hiện tại
 
 ```text
-GatewayRadioTask
-→ RX Queue
-→ GatewayProcessingTask
-→ ACK Queue → GatewayRadioTask
-→ Telemetry Queue → GatewayNetworkTask
-→ MQTT hoặc Offline Buffer
-
-SerialTask → chỉ đọc trạng thái snapshot hoặc gửi control message
-Command Queue → GatewayRadioTask khi radio sẵn sàng
+setup()
+→ Khởi tạo sensor + LoRa + state
+→ loop()/runCycle()
+→ Đọc Soil
+→ Đọc MPU
+→ Đọc pin
+→ Hợp nhất SensorSnapshot
+→ Validate + đóng packet
+→ Gửi LoRa + chờ ACK/retry
+→ Chọn Sleep_Duration
+→ Lưu RTC state
+→ Deep Sleep
 ```
+
+Node xử lý một chu kỳ tuần tự rồi ngủ. Chưa có SoilTask, MpuTask,
+NodeControlTask hoặc NodeRadioTask.
+
+### 16.2 Gateway hiện tại
+
+```text
+setup()
+→ Khởi tạo LoRa + Wi-Fi/MQTT state
+→ loop()
+→ serviceSerial()
+→ serviceGatewayRadio()
+→ Có packet? → processGatewayPacket()
+→ Gửi ACK
+→ serviceNetwork()
+→ serviceOfflineBuffer()
+→ Quay lại đầu loop
+```
+
+Mỗi service phải chạy ngắn và trả quyền điều khiển về `loop()`. Gateway chưa
+có GatewayRadioTask, GatewayProcessingTask, GatewayNetworkTask hoặc queue RTOS.
+
+### 16.3 FreeRTOS sau này
+
+Chỉ chuyển sang FreeRTOS sau khi superloop đã đúng chức năng và có bằng chứng
+timing cho thấy cần chạy độc lập. Khi đó có thể tách Soil, MPU, radio, analysis
+và network thành task/queue. Đây là kế hoạch tương lai, không phải yêu cầu code
+ở giai đoạn hiện tại.
 
 ## 17. Luồng Serial quan sát hệ thống
 
@@ -510,7 +535,8 @@ Gateway boot
 → In MQTT publish OK/FAILED
 ```
 
-Serial không được thay thế database và không được làm block task radio/network.
+Serial không được thay thế database và không được làm block superloop đủ lâu để
+bỏ lỡ radio hoặc làm gián đoạn network service.
 
 ## 18. Điều kiện hoàn thành một chu kỳ
 
@@ -535,4 +561,3 @@ Validation hoàn tất
 → ACK được gửi
 → Telemetry được publish hoặc lưu offline buffer
 ```
-
