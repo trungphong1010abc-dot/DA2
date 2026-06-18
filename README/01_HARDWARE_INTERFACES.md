@@ -1,15 +1,29 @@
-# 3.3 Thiết kế và kết nối phần cứng
+# 01. Hardware Interfaces - Thiết kế, kết nối và chuẩn giao tiếp phần cứng
 
 Phần này trình bày kiến trúc phần cứng, phương án đấu nối và các yêu cầu về
 nguồn của hệ thống nhúng IoT đo gián tiếp biến dạng đất. Hệ thống sử dụng ESP32,
 module LoRa RA-02, cảm biến độ ẩm đất điện dung và MPU6050. Các bảng đấu nối là
 cơ sở để xây dựng Bảng 3.1 và sơ đồ kết nối tổng thể trong báo cáo.
 
+File này là phụ lục phần cứng của `00_DESIGN_RULES.md`. Khi có thay đổi chân,
+chuẩn giao tiếp hoặc điện áp, phải cập nhật cả cấu hình trong
+`src/common/project_config.h`.
+
 ## 3.3.1 Kiến trúc phần cứng
 
 - Node: ESP32 + RA-02 LoRa + MPU6050 + cảm biến độ ẩm đất điện dung + mạch chia áp pin.
 - Gateway: ESP32 + RA-02 LoRa + WiFi, nhận dữ liệu node và đẩy MQTT lên ThingsBoard.
 - Nguồn logic toàn hệ: 3.3 V. RA-02 không chịu logic 5 V.
+
+**Bảng 3.1. Tổng hợp module, chuẩn giao tiếp và chân ESP32**
+
+| Khối | Chuẩn giao tiếp với ESP32 | Chân ESP32 | Dùng ở | Ghi chú |
+| --- | --- | --- | --- | --- |
+| RA-02/SX1278 LoRa | SPI + DIO0 interrupt | SCK GPIO18, MISO GPIO19, MOSI GPIO23, CS GPIO5, RST GPIO14, DIO0 GPIO26 | Node và gateway | 433 MHz, sync word `0xDA`, SF9, BW 125 kHz, CR 4/5 |
+| MPU6050 | I2C | SDA GPIO21, SCL GPIO22, địa chỉ `0x68` khi AD0 nối GND | Node | Đọc WHO_AM_I, cấu hình accelerometer `+-2 g` |
+| Cảm biến độ ẩm đất điện dung | Analog ADC1 | AO -> GPIO34 | Node | ADC 12 bit, median 11 mẫu, DO không dùng |
+| Mạch đo pin | Analog ADC1 qua cầu chia áp | GPIO35 | Node | R1 220 kOhm, R2 100 kOhm, đọc bằng `analogReadMilliVolts()` |
+| Wi-Fi ESP32 gateway | Wi-Fi 2.4 GHz tích hợp | Không dùng GPIO ngoài | Gateway | MQTT publish lên ThingsBoard |
 
 ## 3.3.2 Kết nối LoRa RA-02 với ESP32
 
@@ -71,10 +85,9 @@ ADC_wet = 1200
 H_soil = (3400 - ADC_filtered) * 100 / 2200
 ```
 
-Các giá trị này chưa được cập nhật vào code trong bước tài liệu hiện tại. Khi
-triển khai firmware, cần cập nhật `SOIL_ADC_DRY` và `SOIL_ADC_WET`. Hồ sơ hiệu
-chuẩn nên ghi ngày đo, cảm biến, điện áp cấp, loại đất, độ sâu cắm và thống kê
-các mẫu ADC tại hai trạng thái wet/dry.
+Các giá trị này đang được cấu hình trong `SOIL_ADC_DRY` và `SOIL_ADC_WET`. Hồ
+sơ hiệu chuẩn nên ghi ngày đo, cảm biến, điện áp cấp, loại đất, độ sâu cắm và
+thống kê các mẫu ADC tại hai trạng thái wet/dry.
 
 ### 3.3.3.3 Mạch đo điện áp pin
 

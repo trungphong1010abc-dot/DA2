@@ -1,9 +1,13 @@
-# 2.5 Cơ sở lựa chọn bộ tham số cho đất đỏ bazan
+# 03. Soil Parameter Profile - Cơ sở lựa chọn bộ tham số đất đỏ bazan
 
 ## 2.5.1 Mục đích và phạm vi áp dụng
 
 Tài liệu này chốt một bộ tham số cụ thể để sau này triển khai mô hình `FS`,
 `DI` và `epsilon_star` trong firmware.
+
+File này là phụ lục tham số của `00_DESIGN_RULES.md`. Nó giải thích vì sao chọn
+profile đất đỏ bazan hiện tại; công thức sử dụng, ngưỡng cảnh báo và telemetry
+key vẫn lấy `00_DESIGN_RULES.md` làm gốc.
 
 Loại đất đại diện được chọn:
 

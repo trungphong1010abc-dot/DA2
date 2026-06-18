@@ -34,6 +34,11 @@ Sửa trong `src/common/project_config.h`:
 - `SOIL_ADC_DRY`, `SOIL_ADC_WET` sau khi hiệu chuẩn cảm biến độ ẩm đất.
 - Tham số cơ học đất: gamma, chiều dày lớp trượt, lực dính, góc ma sát trong, ngưỡng cảnh báo.
 
-## Tài liệu đấu nối
+## Bộ tài liệu thiết kế
 
-Xem `README/HARDWARE_WIRING_GUIDE.md` để đấu nối gateway, node, mạch chia áp pin và cách gắn tụ gốm/tụ hóa lọc nhiễu.
+Đọc theo thứ tự:
+
+1. `README/00_DESIGN_RULES.md` - đặc tả gốc, ngưỡng, công thức, giao thức và tiêu chí kiểm thử.
+2. `README/01_HARDWARE_INTERFACES.md` - đấu nối ESP32, chuẩn giao tiếp từng module, nguồn và lọc nhiễu.
+3. `README/02_SYSTEM_FLOW.md` - luồng node, gateway, ACK, ThingsBoard và deep sleep.
+4. `README/03_SOIL_PARAMETER_PROFILE.md` - cơ sở chọn bộ tham số đất đỏ bazan.

@@ -1,17 +1,25 @@
-# Phụ lục A. Đặc tả và quy tắc thiết kế hệ thống DA2
+# 00. Design Rules - Đặc tả gốc hệ thống DA2
 
-Phụ lục này cụ thể hóa các yêu cầu kỹ thuật được trình bày trong Chương 2 và
-Chương 3 của báo cáo. Nội dung được dùng làm căn cứ thống nhất tên biến, đơn vị,
-giao thức, công thức, điều kiện kiểm tra và tiêu chí nghiệm thu trước khi viết
-firmware. Các giá trị gắn nhãn `PROVISIONAL` là giả định thiết kế ban đầu, không
-được trình bày như kết quả đo hoặc kết quả thí nghiệm của khu vực khảo sát.
+Tài liệu này là gốc thiết kế của hệ thống DA2. Khi cần đọc nhanh, đọc file này
+trước để nắm tên biến, đơn vị, giao thức, công thức, ngưỡng, điều kiện kiểm tra
+và tiêu chí nghiệm thu. Các file còn lại trong thư mục `README/` là phụ lục bổ
+trợ, tách riêng để tài liệu gốc không quá dài nhưng vẫn bám cùng một thiết kế.
 
-| Nội dung trong phụ lục | Vị trí thuyết minh chính |
-| --- | --- |
-| Cảm biến, kết nối phần cứng | Mục 3.3, `HARDWARE_WIRING_GUIDE.md` |
-| Nguyên lý và luồng hoạt động | Mục 3.4, `SYSTEM_WORKFLOW.md` |
-| Ngưỡng cảnh báo | Mục 3.5, `BANG_3_2_NGUONG_CANH_BAO.md` |
-| Cơ sở chọn tham số đất | Mục 2.5, `PHAN_TICH_THAM_SO_DAT_DO_BAZAN.md` |
+Các giá trị gắn nhãn `PROVISIONAL` là giả định thiết kế ban đầu, không được
+trình bày như kết quả đo hoặc kết quả thí nghiệm của khu vực khảo sát.
+
+## Cách đọc bộ tài liệu
+
+| Thứ tự | File | Vai trò |
+| ---: | --- | --- |
+| 1 | `00_DESIGN_RULES.md` | Đặc tả gốc: dữ liệu, giao thức, công thức, ngưỡng, cảnh báo, duty cycle và tiêu chí kiểm thử |
+| 2 | `01_HARDWARE_INTERFACES.md` | Phụ lục phần cứng: đấu nối ESP32, chuẩn giao tiếp từng module, nguồn và chống nhiễu |
+| 3 | `02_SYSTEM_FLOW.md` | Phụ lục luồng xử lý: chu kỳ node, gateway, ACK, ThingsBoard và deep sleep |
+| 4 | `03_SOIL_PARAMETER_PROFILE.md` | Phụ lục tham số đất: cơ sở chọn profile `BASALT_RED_SOIL_V1_PROVISIONAL` |
+
+Quy tắc ưu tiên: nếu nội dung phụ lục khác với `00_DESIGN_RULES.md`, phải sửa
+phụ lục hoặc tạo quyết định thiết kế mới; không để các file phát triển thành
+năm nguồn sự thật độc lập.
 
 ## 1. Mục đích và phạm vi
 
@@ -401,6 +409,61 @@ beta_dot_sanity_max = 360°/h = 0.1°/s
 Dữ liệu lỗi vẫn có thể được đóng packet để gateway biết trạng thái, nhưng phải
 có `error_flag != 0`; không được giả thành packet bình thường.
 
+### 6.8 Bảng 3.2 - Ngưỡng dữ liệu và cảnh báo
+
+Bảng này thay thế file bảng ngưỡng rời trước đây. Các giá trị phải bám
+`src/common/project_config.h` và logic trong `src/common/analysis.cpp`.
+
+| STT | Đại lượng | Key/config | Đơn vị | Bình thường | Cảnh báo | Nguy hiểm/lỗi | Vai trò |
+| ---: | --- | --- | --- | --- | --- | --- | --- |
+| 1 | ADC độ ẩm sau lọc | `soil_adc_filtered` | count | `100 <= ADC <= 4090` | Không dùng trực tiếp | Lỗi quá 3 lần liên tiếp -> `ERR_SOIL` | Kiểm tra cảm biến trước khi tính `h_soil` |
+| 2 | Độ ẩm đất tương đối | `h_soil` | % | `0 <= H_soil < 65` | `65 <= H_soil < 95` | `H_soil >= 95` là vùng gần bão hòa theo mô hình | Đầu vào tính áp lực nước lỗ rỗng |
+| 3 | Góc nghiêng tổng | `beta_deg` | độ | `0 <= beta <= 60` | Không có ngưỡng riêng | Ngoài miền -> `ERR_DATA_RANGE` | Đầu vào mô hình mái dốc |
+| 4 | Tốc độ đổi góc | `beta_dot_deg_per_hour` | độ/giờ | Nhỏ hơn ngưỡng DI | Gần `2.0` | `abs(beta_dot) >= 2.0` làm thành phần DI đạt mức nguy hiểm tương đối | Thành phần thứ nhất của DI |
+| 5 | Rung động RMS | `a_rms_g` | g | Nhỏ hơn ngưỡng DI | Gần `0.05` | `A_rms >= 0.05` làm thành phần DI đạt mức nguy hiểm tương đối | Thành phần thứ hai của DI |
+| 6 | Điện áp pin | `v_bat` | V | `V_bat >= 3.5` | `3.3 <= V_bat < 3.5` | `< 3.3` rất yếu; ngoài `3.0..4.25` là dữ liệu bất thường | Ưu tiên trạng thái nguồn và duty cycle |
+| 7 | Áp lực nước lỗ rỗng | `u_kpa` | kPa | Không có ngưỡng độc lập | Tăng sau `H_c=65%` | Không kết luận nguy hiểm trực tiếp | Làm giảm ứng suất hữu hiệu |
+| 8 | Ứng suất gây trượt | `tau_kpa` | kPa | Không có ngưỡng độc lập | Không áp dụng | `abs(tau) <= 0.001` -> analysis invalid | Mẫu số của FS |
+| 9 | Ứng suất pháp tuyến tổng | `sigma_n_kpa` | kPa | Không có ngưỡng độc lập | Không áp dụng | Không hữu hạn -> analysis invalid | Thành phần mô hình mái dốc |
+| 10 | Ứng suất hữu hiệu | `sigma_effective_kpa` | kPa | Không có ngưỡng độc lập | Giá trị giảm thể hiện ảnh hưởng bất lợi của nước | Không tự ép âm về 0 | Đầu vào Mohr-Coulomb |
+| 11 | Sức kháng cắt | `tau_f_kpa` | kPa | Không có ngưỡng độc lập | Không áp dụng | Không hữu hạn -> analysis invalid | Tử số của FS |
+| 12 | Hệ số an toàn | `fs` | Không đơn vị | `FS > 1.3` | `1.0 < FS <= 1.3` | `FS <= 1.0` | Chỉ số ổn định cơ học chính |
+| 13 | Chỉ số động học | `di` | Không đơn vị | `DI < 0.5` | `0.5 <= DI < 1.0` | `DI >= 1.0` | Phát hiện chuyển động/rung bất thường |
+| 14 | Độ giãn tương đối quy ước | `epsilon_star` | Không đơn vị | `< 0.77` | `0.77 <= epsilon_star < 1.0` | `>= 1.0` | Chỉ số quy ước `1/FS` |
+| 15 | Cờ lỗi | `error_flag` | Bitmask | `0` | Không áp dụng | Khác `0` -> nhánh lỗi | Chặn phân loại NORMAL khi dữ liệu không đáng tin |
+
+Ngưỡng cấu hình hiện tại:
+
+| Tham số | Giá trị | Đơn vị | Tên trong code |
+| --- | ---: | --- | --- |
+| `ADC_min` | 100 | count | `SOIL_ADC_MIN_VALID` |
+| `ADC_max` | 4090 | count | `SOIL_ADC_MAX_VALID` |
+| `ADC_dry` | 3400 | count | `SOIL_ADC_DRY` |
+| `ADC_wet` | 1200 | count | `SOIL_ADC_WET` |
+| `H_c` | 65 | % | `MOISTURE_DANGER_START_PERCENT` |
+| `H_sat` | 95 | % | `MOISTURE_SATURATION_PERCENT` |
+| `u_max` | 10 | kPa | `PORE_PRESSURE_MAX_KPA` |
+| `gamma` | 18 | kN/m3 | `SOIL_GAMMA_KN_M3` |
+| `z` | 1.0 | m | `SLIP_LAYER_DEPTH_M` |
+| `c'` | 5 | kPa | `SOIL_COHESION_KPA` |
+| `phi'` | 28 | độ | `SOIL_FRICTION_ANGLE_DEG` |
+| `beta_dot_crit` | 2.0 | độ/giờ | `BETA_DOT_CRIT_DEG_PER_HOUR` |
+| `A_crit` | 0.05 | g | `A_RMS_CRIT_G` |
+| `w1` | 0.70 | Không đơn vị | `DI_WEIGHT_BETA_DOT` |
+| `w2` | 0.30 | Không đơn vị | `DI_WEIGHT_VIBRATION` |
+| `FS_warning` | 1.3 | Không đơn vị | `FS_WARNING` |
+| `FS_danger` | 1.0 | Không đơn vị | `FS_DANGER` |
+| `DI_warning` | 0.5 | Không đơn vị | `DI_WARNING` |
+| `DI_danger` | 1.0 | Không đơn vị | `DI_DANGER` |
+| `epsilon_warning` | 0.77 | Không đơn vị | `STRAIN_WARNING` |
+| `epsilon_danger` | 1.0 | Không đơn vị | `STRAIN_DANGER` |
+| `V_bat_low` | 3.5 | V | `BATTERY_LOW_V` |
+| `V_bat_critical` | 3.3 | V | `BATTERY_CRITICAL_V` |
+
+Trước khi coi các ngưỡng là chính thức ngoài mô hình thử nghiệm, cần hiệu chuẩn
+ADC dry/wet, đo rung nền, kiểm tra độ trôi góc, fit quan hệ `H_soil -> u`, xác
+nhận tham số đất và kiểm tra pin dưới tải phát LoRa.
+
 ## 7. Giao thức Node → Gateway
 
 ### 7.1 Packet dữ liệu
@@ -466,7 +529,7 @@ Quy tắc:
 ## 9. Mô hình phân tích địa kỹ thuật
 
 Bộ tham số giả định cụ thể cho profile đất đỏ bazan phong hóa pha sét được phân
-tích tại `README/PHAN_TICH_THAM_SO_DAT_DO_BAZAN.md`. Profile này dùng cho triển
+tích tại `README/03_SOIL_PARAMETER_PROFILE.md`. Profile này dùng cho triển
 khai phần mềm ban đầu và phải mang trạng thái `PROVISIONAL`.
 
 ### 9.1 Áp lực nước lỗ rỗng

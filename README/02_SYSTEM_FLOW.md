@@ -1,9 +1,13 @@
-# 3.4 Nguyên lý hoạt động và lưu đồ thuật toán
+# 02. System Flow - Nguyên lý hoạt động và lưu đồ thuật toán
 
 Nội dung mục này trình bày trình tự hoạt động của hệ thống từ thời điểm node
 thức dậy, thu thập dữ liệu cảm biến, truyền packet LoRa, xử lý tại gateway đến
 khi dữ liệu được gửi lên ThingsBoard. Các luồng được mô tả bằng chuỗi hành động
 và nhánh quyết định để thuận tiện chuyển thành lưu đồ trong báo cáo.
+
+File này là phụ lục luồng xử lý của `00_DESIGN_RULES.md`. Công thức, tên key,
+ngưỡng và trạng thái cảnh báo phải ưu tiên theo design rules; file này chỉ mô
+tả trình tự thực hiện từ trên xuống.
 
 ## 3.4.1 Quy ước mô tả luồng
 
