@@ -15,11 +15,11 @@ trình bày như kết quả đo hoặc kết quả thí nghiệm của khu vự
 | 1 | `00_DESIGN_RULES.md` | Đặc tả gốc: dữ liệu, giao thức, công thức, ngưỡng, cảnh báo, duty cycle và tiêu chí kiểm thử |
 | 2 | `01_HARDWARE_INTERFACES.md` | Phụ lục phần cứng: đấu nối ESP32, chuẩn giao tiếp từng module, nguồn và chống nhiễu |
 | 3 | `02_SYSTEM_FLOW.md` | Phụ lục luồng xử lý: chu kỳ node, gateway, ACK, ThingsBoard và deep sleep |
-| 4 | `03_SOIL_PARAMETER_PROFILE.md` | Phụ lục tham số đất: cơ sở chọn profile `BASALT_RED_SOIL_V1_PROVISIONAL` |
+| 4 | `03_SOIL_GEOTECHNICAL_MODEL.md` | Phụ lục đất: bộ thông số `BASALT_RED_SOIL_V1_PROVISIONAL`, mô hình FS, DI, epsilon và ví dụ tính |
 
 Quy tắc ưu tiên: nếu nội dung phụ lục khác với `00_DESIGN_RULES.md`, phải sửa
 phụ lục hoặc tạo quyết định thiết kế mới; không để các file phát triển thành
-năm nguồn sự thật độc lập.
+nhiều nguồn sự thật độc lập.
 
 ## 1. Mục đích và phạm vi
 
@@ -411,26 +411,18 @@ có `error_flag != 0`; không được giả thành packet bình thường.
 
 ### 6.8 Bảng 3.2 - Ngưỡng dữ liệu và cảnh báo
 
-Bảng này thay thế file bảng ngưỡng rời trước đây. Các giá trị phải bám
-`src/common/project_config.h` và logic trong `src/common/analysis.cpp`.
+Bảng này chỉ giữ bản tóm tắt để tra nhanh. Giải thích chi tiết ý nghĩa từng đại
+lượng, nguồn công thức và ví dụ tính nằm trong
+`README/03_SOIL_GEOTECHNICAL_MODEL.md`.
 
-| STT | Đại lượng | Key/config | Đơn vị | Bình thường | Cảnh báo | Nguy hiểm/lỗi | Vai trò |
-| ---: | --- | --- | --- | --- | --- | --- | --- |
-| 1 | ADC độ ẩm sau lọc | `soil_adc_filtered` | count | `100 <= ADC <= 4090` | Không dùng trực tiếp | Lỗi quá 3 lần liên tiếp -> `ERR_SOIL` | Kiểm tra cảm biến trước khi tính `h_soil` |
-| 2 | Độ ẩm đất tương đối | `h_soil` | % | `0 <= H_soil < 65` | `65 <= H_soil < 95` | `H_soil >= 95` là vùng gần bão hòa theo mô hình | Đầu vào tính áp lực nước lỗ rỗng |
-| 3 | Góc nghiêng tổng | `beta_deg` | độ | `0 <= beta <= 60` | Không có ngưỡng riêng | Ngoài miền -> `ERR_DATA_RANGE` | Đầu vào mô hình mái dốc |
-| 4 | Tốc độ đổi góc | `beta_dot_deg_per_hour` | độ/giờ | Nhỏ hơn ngưỡng DI | Gần `2.0` | `abs(beta_dot) >= 2.0` làm thành phần DI đạt mức nguy hiểm tương đối | Thành phần thứ nhất của DI |
-| 5 | Rung động RMS | `a_rms_g` | g | Nhỏ hơn ngưỡng DI | Gần `0.05` | `A_rms >= 0.05` làm thành phần DI đạt mức nguy hiểm tương đối | Thành phần thứ hai của DI |
-| 6 | Điện áp pin | `v_bat` | V | `V_bat >= 3.5` | `3.3 <= V_bat < 3.5` | `< 3.3` rất yếu; ngoài `3.0..4.25` là dữ liệu bất thường | Ưu tiên trạng thái nguồn và duty cycle |
-| 7 | Áp lực nước lỗ rỗng | `u_kpa` | kPa | Không có ngưỡng độc lập | Tăng sau `H_c=65%` | Không kết luận nguy hiểm trực tiếp | Làm giảm ứng suất hữu hiệu |
-| 8 | Ứng suất gây trượt | `tau_kpa` | kPa | Không có ngưỡng độc lập | Không áp dụng | `abs(tau) <= 0.001` -> analysis invalid | Mẫu số của FS |
-| 9 | Ứng suất pháp tuyến tổng | `sigma_n_kpa` | kPa | Không có ngưỡng độc lập | Không áp dụng | Không hữu hạn -> analysis invalid | Thành phần mô hình mái dốc |
-| 10 | Ứng suất hữu hiệu | `sigma_effective_kpa` | kPa | Không có ngưỡng độc lập | Giá trị giảm thể hiện ảnh hưởng bất lợi của nước | Không tự ép âm về 0 | Đầu vào Mohr-Coulomb |
-| 11 | Sức kháng cắt | `tau_f_kpa` | kPa | Không có ngưỡng độc lập | Không áp dụng | Không hữu hạn -> analysis invalid | Tử số của FS |
-| 12 | Hệ số an toàn | `fs` | Không đơn vị | `FS > 1.3` | `1.0 < FS <= 1.3` | `FS <= 1.0` | Chỉ số ổn định cơ học chính |
-| 13 | Chỉ số động học | `di` | Không đơn vị | `DI < 0.5` | `0.5 <= DI < 1.0` | `DI >= 1.0` | Phát hiện chuyển động/rung bất thường |
-| 14 | Độ giãn tương đối quy ước | `epsilon_star` | Không đơn vị | `< 0.77` | `0.77 <= epsilon_star < 1.0` | `>= 1.0` | Chỉ số quy ước `1/FS` |
-| 15 | Cờ lỗi | `error_flag` | Bitmask | `0` | Không áp dụng | Khác `0` -> nhánh lỗi | Chặn phân loại NORMAL khi dữ liệu không đáng tin |
+| Nhóm | Đại lượng/key chính | Ngưỡng/miền hiện tại | Vai trò |
+| --- | --- | --- | --- |
+| Soil sensor | `soil_adc_filtered`, `h_soil` | ADC `100..4090`; `0..100%`; mốc mô hình `65%` và `95%` | Kiểm tra cảm biến và làm đầu vào tính `u_kpa` |
+| MPU slope | `beta_deg`, `beta_dot_deg_per_hour`, `a_rms_g` | `0..60°`; sanity `360°/h`; `0..1 g` | Kiểm tra miền dữ liệu và tạo DI |
+| Battery | `v_bat` | sanity `3.0..4.25 V`; low `<3.5 V`; critical `<3.3 V` | Ưu tiên trạng thái nguồn và duty cycle |
+| FS model | `u_kpa`, `tau_kpa`, `sigma_n_kpa`, `sigma_effective_kpa`, `tau_f_kpa`, `fs` | `FS > 1.3` normal; `1.0 < FS <= 1.3` warning; `FS <= 1.0` danger | Đánh giá ổn định cơ học |
+| Dynamic model | `di`, `epsilon_star` | `DI < 0.5`; `DI >= 1.0`; `epsilon_star = 1 / FS` | Phát hiện chuyển động bất thường và hiển thị mức nguy cơ |
+| Error state | `error_flag`, `analysis_valid` | `error_flag = 0` mới được phân loại normal | Chặn kết luận an toàn khi dữ liệu không đáng tin |
 
 Ngưỡng cấu hình hiện tại:
 
@@ -528,35 +520,24 @@ Quy tắc:
 
 ## 9. Mô hình phân tích địa kỹ thuật
 
-Bộ tham số giả định cụ thể cho profile đất đỏ bazan phong hóa pha sét được phân
-tích tại `README/03_SOIL_PARAMETER_PROFILE.md`. Profile này dùng cho triển
-khai phần mềm ban đầu và phải mang trạng thái `PROVISIONAL`.
+Bộ tham số giả định cụ thể cho profile đất đỏ bazan phong hóa pha sét, cách tạo
+công thức và ví dụ tính được trình bày tại
+`README/03_SOIL_GEOTECHNICAL_MODEL.md`. Profile này dùng cho triển khai phần
+mềm ban đầu và phải mang trạng thái `PROVISIONAL`.
 
 ### 9.1 Áp lực nước lỗ rỗng
 
 ```text
-u = u_max × max(0, (H_soil - H_c) / (H_sat - H_c))
+u = u_max × clamp((H_soil - H_c) / (H_sat - H_c), 0, 1)
 ```
 
-- `H_soil`, `H_c`, `H_sat` phải cùng cách biểu diễn: cùng là % hoặc cùng 0–1.
-- Không tự chặn phía trên nếu công thức thiết kế chỉ yêu cầu `max(0, ...)`.
-- Nếu muốn giới hạn `u <= u_max`, phải cập nhật đặc tả và nêu lý do vật lý.
-- `H_c=65%`, `H_sat=95%`, `u_max=10 kPa` hiện là giả định thiết kế, chưa được
-  fit bằng phép đo áp lực nước lỗ rỗng.
-
-Nguồn và cách lựa chọn:
-
-- `H_c` phải lấy từ điểm mà áp lực nước lỗ rỗng đo tham chiếu bắt đầu rời khỏi
-  vùng nhiễu gần 0 khi tăng độ ẩm.
-- `H_sat` phải được xác định tại trạng thái mẫu gần bão hòa bằng phương pháp
-  tham chiếu. Chỉ số `H_soil=95%` không đồng nghĩa độ bão hòa vật lý 95%.
-- `u_max` phải lấy từ piezometer/cảm biến áp lực nước lỗ rỗng đo đồng thời với
-  `H_soil`; không thể suy ra `u_max` từ `ADC_wet` và `ADC_dry`.
-- Quy trình fit: giữ cố định loại đất, độ chặt và hình học → tăng nước theo từng
-  mức → chờ ổn định → ghi `ADC_filtered`, `H_soil`, `u_reference` → lặp nhiều
-  chu kỳ → fit `H_c`, `H_sat`, `u_max` → đánh giá RMSE/MAE.
-- Nếu chưa có `u_reference`, kết quả `u` và FS phải mang nhãn
-  `MODEL_PROVISIONAL` và chỉ được mô tả là mô phỏng.
+`H_soil`, `H_c`, `H_sat` phải cùng đơn vị biểu diễn. Với profile hiện tại:
+`H_c=65%`, `H_sat=95%`, `u_max=10 kPa`. Khi `H_soil <= H_c` thì `u=0`; khi
+`H_soil >= H_sat` thì `u=u_max`. Đây là tham số mô hình `PROVISIONAL`, chưa
+phải áp lực nước lỗ rỗng đo trực tiếp. Dạng chặn trên theo `u_max` bám theo
+diễn giải trong `C:\Users\Public\New Section 1.pdf`; giá trị `10 kPa` là giả
+định kỹ thuật của profile hiện tại. Chi tiết xem
+`README/03_SOIL_GEOTECHNICAL_MODEL.md`.
 
 ### 9.2 Mô hình mái dốc vô hạn
 
@@ -568,36 +549,12 @@ tau_f   = c' + sigma_effective × tan(phi')
 FS      = tau_f / tau
 ```
 
-Quy tắc:
-
 - `beta` đổi sang radian khi gọi hàm lượng giác.
 - `gamma` dùng kN/m³ và `z` dùng m để kết quả ứng suất là kPa.
 - Không tự ép `sigma_effective` âm thành 0 nếu đặc tả chưa yêu cầu.
 - Nếu `tau` bằng hoặc quá gần 0, `FS` không hợp lệ; không thay bằng 99.
-- `gamma=18 kN/m³`, `z=1 m`, `c'=5 kPa`, `phi'=28°` hiện là bộ tham số mô
-  phỏng ban đầu, không phải kết quả thí nghiệm của mẫu đất.
-
-Nguồn và cách lựa chọn:
-
-- `gamma`: đo density/unit weight trên mẫu đất đại diện rồi tính
-  `gamma = rho × g`. Có thể tham khảo ASTM D7263. Giá trị 18 kN/m³ hiện là giả
-  định, không phải kết quả mẫu đất DA2.
-- `z`: lấy từ khảo sát địa tầng, hố đào, khoan, mặt phân lớp hoặc đo hình học
-  mô hình. MPU6050 không đo được chiều sâu lớp trượt. Nếu chưa chắc chắn, phải
-  tính sensitivity với nhiều giá trị `z`.
-- `c'` và `phi'`: lấy từ direct shear drained hoặc triaxial phù hợp trên đúng
-  mẫu đất. ASTM D3080/D3080M dùng direct shear consolidated drained. Fit:
-
-```text
-tau_failure = c' + sigma_effective × tan(phi')
-c' = giao điểm trục tau
-phi' = atan(độ dốc đường fit)
-```
-
-- ASTM D4767 có thể tham khảo cho triaxial đất dính; lựa chọn điều kiện và diễn
-  giải tham số phải do người có chuyên môn địa kỹ thuật quyết định.
-- `beta`: lấy từ góc hình học mái dốc hoặc MPU6050 đã hiệu chuẩn trục và gá cứng.
-  Phải phân biệt góc dốc nền với phần thay đổi góc của khối cảm biến.
+- `gamma=18 kN/m³`, `z=1 m`, `c'=5 kPa`, `phi'=28°` là bộ tham số mô phỏng
+  ban đầu, không phải kết quả thí nghiệm của mẫu đất.
 
 ### 9.3 Chỉ số động học
 
@@ -606,25 +563,9 @@ DI = w1 × abs(beta_dot / beta_dot_crit)
    + w2 × (A_rms / A_crit)
 ```
 
-- Công bố `w1`, `w2`, `beta_dot_crit`, `A_crit` trong cấu hình.
-- `beta_dot` và `beta_dot_crit` phải cùng đơn vị.
-- Nếu `A_rms` không âm theo định nghĩa, không cần lấy trị tuyệt đối.
-- `beta_dot_crit=2 độ/giờ`, `A_crit=0.05 g`, `w1=0.70`, `w2=0.30` là giả
-  định thiết kế hiện tại; phải được kiểm chứng bằng dữ liệu có nhãn.
-
-Nguồn và cách lựa chọn:
-
-- `beta_dot_crit`: đo noise/drift khi đứng yên và đo các thử nghiệm ổn định,
-  bắt đầu dịch chuyển, nguy hiểm; chọn ngưỡng theo false alarm và missed
-  detection. Giá trị 2 độ/giờ hiện chưa có dữ liệu hiện trường chứng minh.
-- `A_crit`: đo `A_rms` nền sau khi gắn MPU6050, các nguồn rung môi trường bình
-  thường và các thử nghiệm dịch chuyển có nhãn. Datasheet MPU6050 không cung
-  cấp ngưỡng rung gây sạt lở. Giá trị 0.05 g hiện là giả định.
-- `w1`, `w2` phải không âm và có tổng bằng 1. Có thể chọn bằng chuyên gia khi
-  chưa có dữ liệu, nhưng tốt hơn là tối ưu trên tập dữ liệu có nhãn và kiểm tra
-  sensitivity. Cặp 0.70/0.30 biểu thị quyết định thiết kế ưu tiên xu hướng thay
-  đổi góc so với rung tức thời, do chuyển vị chậm phù hợp hơn với mục tiêu theo
-  dõi biến dạng mái dốc của mô hình thử nghiệm.
+`beta_dot` và `beta_dot_crit` phải cùng đơn vị. Với profile hiện tại:
+`beta_dot_crit=2 độ/giờ`, `A_crit=0.05 g`, `w1=0.70`, `w2=0.30`. Các giá trị
+này cần được kiểm chứng bằng dữ liệu thử nghiệm có nhãn.
 
 ### 9.4 Độ giãn tương đối quy ước
 
@@ -635,7 +576,9 @@ epsilon_star = 1 / FS
 Nếu `FS` không hợp lệ hoặc bằng 0, `epsilon_star` cũng không hợp lệ.
 
 `epsilon_star` không phải strain vật lý đo bằng strain gauge. Nếu các tham số
-tạo FS còn là giả định thì `epsilon_star` cũng chỉ là chỉ số mô phỏng.
+tạo FS còn là giả định thì `epsilon_star` cũng chỉ là chỉ số mô phỏng. Diễn
+giải chi tiết các đại lượng từ `u_kpa` đến `epsilon_star` nằm trong
+`README/03_SOIL_GEOTECHNICAL_MODEL.md`.
 
 ### 9.5 Trạng thái nguồn tham số
 

@@ -15,7 +15,8 @@ float degToRad(float deg) {
 float calcPorePressure(float soilPercent) {
   const float normalized = (soilPercent - Config::MOISTURE_DANGER_START_PERCENT) /
                            (Config::MOISTURE_SATURATION_PERCENT - Config::MOISTURE_DANGER_START_PERCENT);
-  return Config::PORE_PRESSURE_MAX_KPA * fmaxf(0.0f, normalized);
+  const float bounded = fminf(1.0f, fmaxf(0.0f, normalized));
+  return Config::PORE_PRESSURE_MAX_KPA * bounded;
 }
 
 float calcDynamicIndex(const Protocol::SensorPacket &data) {

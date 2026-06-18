@@ -41,4 +41,4 @@ Sửa trong `src/common/project_config.h`:
 1. `README/00_DESIGN_RULES.md` - đặc tả gốc, ngưỡng, công thức, giao thức và tiêu chí kiểm thử.
 2. `README/01_HARDWARE_INTERFACES.md` - đấu nối ESP32, chuẩn giao tiếp từng module, nguồn và lọc nhiễu.
 3. `README/02_SYSTEM_FLOW.md` - luồng node, gateway, ACK, ThingsBoard và deep sleep.
-4. `README/03_SOIL_PARAMETER_PROFILE.md` - cơ sở chọn bộ tham số đất đỏ bazan.
+4. `README/03_SOIL_GEOTECHNICAL_MODEL.md` - bộ thông số đất đỏ bazan, mô hình FS, DI, epsilon và ví dụ tính.

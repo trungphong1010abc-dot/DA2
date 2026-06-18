@@ -272,7 +272,7 @@ Nhánh đủ dữ liệu:
 
 ```text
 Yes
-→ Tính u = u_max × max(0, (H_soil-H_c)/(H_sat-H_c))
+→ Tính u = u_max × clamp((H_soil-H_c)/(H_sat-H_c), 0, 1)
 → Tính tau = gamma × z × sin(beta) × cos(beta)
 → Tính sigma_n = gamma × z × cos²(beta)
 → Tính sigma_effective = sigma_n - u
