@@ -40,7 +40,7 @@ Các giá trị dưới đây phải đồng bộ với `src/common/project_conf
 
 | Nhóm | Tham số | Giá trị | Đơn vị | Tên trong code | Trạng thái | Ý nghĩa nhanh |
 | --- | --- | ---: | --- | --- | --- | --- |
-| Hiệu chuẩn soil sensor | `ADC_wet` | 1200 | count | `SOIL_ADC_WET` | `MEASURED_SENSOR` | ADC khi cảm biến ở trạng thái ướt đã hiệu chuẩn |
+| Hiệu chuẩn soil sensor | `ADC_wet` | 1400 | count | `SOIL_ADC_WET` | `MEASURED_SENSOR` | ADC khi cảm biến ở trạng thái ướt đã hiệu chuẩn |
 | Hiệu chuẩn soil sensor | `ADC_dry` | 3400 | count | `SOIL_ADC_DRY` | `MEASURED_SENSOR` | ADC khi cảm biến ở trạng thái khô đã hiệu chuẩn |
 | Nước lỗ rỗng | `H_c` | 65 | % | `MOISTURE_DANGER_START_PERCENT` | `ENGINEERING_ASSUMPTION` | Mốc độ ẩm bắt đầu làm `u_kpa` tăng khỏi 0 |
 | Nước lỗ rỗng | `H_sat` | 95 | % | `MOISTURE_SATURATION_PERCENT` | `ENGINEERING_ASSUMPTION` | Mốc gần bão hòa theo chỉ số cảm biến |
@@ -59,7 +59,7 @@ Các giá trị dưới đây phải đồng bộ với `src/common/project_conf
 Phiên bản hằng số dạng firmware:
 
 ```text
-SOIL_ADC_WET = 1200
+SOIL_ADC_WET = 1400
 SOIL_ADC_DRY = 3400
 
 MOISTURE_DANGER_START_PERCENT = 65.0
@@ -87,7 +87,7 @@ kỹ thuật để firmware có một profile nhất quán.
 
 | Tham số | Cơ sở chọn |
 | --- | --- |
-| `ADC_wet=1200`, `ADC_dry=3400` | Giá trị hiệu chuẩn người dùng cung cấp |
+| `ADC_wet=1400`, `ADC_dry=3400` | Giá trị hiệu chuẩn người dùng cung cấp |
 | `H_c=65%` | Chỉ bắt đầu tăng áp lực nước khi đất đã khá ẩm, tránh làm FS giảm quá sớm ở vùng khô-trung bình |
 | `H_sat=95%` | Cho phép mô hình đạt vùng gần `u_max` trước khi ADC chạm đúng wet-point 100% |
 | `u_max=10 kPa` | Bảo thủ nhưng không quá lớn so với tải phủ `gamma*z = 18 kPa` trong miền góc thường dùng |
@@ -201,8 +201,8 @@ Với cấu hình hiện tại:
 
 ```text
 ADC_dry = 3400
-ADC_wet = 1200
-H_soil = (3400 - ADC_filtered) * 100 / 2200
+ADC_wet = 1400
+H_soil = (3400 - ADC_filtered) * 100 / 2000
 ```
 
 Giải thích:
@@ -962,11 +962,10 @@ Code hiện tại phân loại theo thứ tự ưu tiên:
 
 ```text
 1. Sensor/config/data error
-2. Battery invalid/critical/low
-3. Analysis invalid
-4. DANGER nếu FS <= 1.0 hoặc DI >= 1.0 hoặc epsilon_star >= 1.0
-5. WARNING nếu FS <= 1.3 hoặc DI >= 0.5 hoặc epsilon_star >= 0.77 hoặc pin low
-6. NORMAL nếu không vướng các điều kiện trên
+2. Analysis invalid
+3. DANGER nếu FS <= 1.0 hoặc DI >= 1.0 hoặc epsilon_star >= 1.0
+4. WARNING nếu FS <= 1.3 hoặc DI >= 0.5 hoặc epsilon_star >= 0.77
+5. NORMAL nếu không vướng các điều kiện trên
 ```
 
 Ngưỡng chính:
@@ -987,7 +986,7 @@ Các giá trị dưới đây phải đồng bộ với `src/common/project_conf
 | Tham số | Giá trị | Tên code |
 | --- | ---: | --- |
 | `ADC_dry` | `3400 count` | `SOIL_ADC_DRY` |
-| `ADC_wet` | `1200 count` | `SOIL_ADC_WET` |
+| `ADC_wet` | `1400 count` | `SOIL_ADC_WET` |
 | `H_c` | `65%` | `MOISTURE_DANGER_START_PERCENT` |
 | `H_sat` | `95%` | `MOISTURE_SATURATION_PERCENT` |
 | `u_max` | `10 kPa` | `PORE_PRESSURE_MAX_KPA` |
@@ -1052,7 +1051,7 @@ số của mẫu đất DA2.
 
 ## 27. Nguyên tắc viết báo cáo
 
-- Ghi rõ `ADC_dry=3400` và `ADC_wet=1200` là hiệu chuẩn cảm biến hiện tại.
+- Ghi rõ `ADC_dry=3400` và `ADC_wet=1400` là hiệu chuẩn cảm biến hiện tại.
 - Ghi rõ các tham số `gamma`, `z`, `c'`, `phi'`, `H_c`, `H_sat`, `u_max`,
   `beta_dot_crit`, `A_crit`, `w1`, `w2` là `ENGINEERING_ASSUMPTION`.
 - Không viết `epsilon_star` như strain thật.

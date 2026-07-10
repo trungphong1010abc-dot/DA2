@@ -35,6 +35,7 @@ static constexpr int LORA_SCK_PIN = 18;
 static constexpr int LORA_MISO_PIN = 19;
 static constexpr int LORA_MOSI_PIN = 23;
 static constexpr int LORA_CS_PIN = 5;
+static constexpr int GATEWAY_LORA_CS_PIN = 33;
 static constexpr int LORA_RST_PIN = 14;
 static constexpr int LORA_DIO0_PIN = 26;
 
@@ -43,14 +44,24 @@ static constexpr int I2C_SDA_PIN = 21;
 static constexpr int I2C_SCL_PIN = 22;
 static constexpr uint8_t MPU6050_ADDR = 0x68;
 
+// MPU6050 calibration profile used by the node firmware.
+// Replace these provisional values with measured averages after final calibration.
+static constexpr float MPU_AX_OFFSET_G = 0.018f;
+static constexpr float MPU_AY_OFFSET_G = -0.012f;
+static constexpr float MPU_AZ_OFFSET_G = 0.031f;
+static constexpr float MPU_GX_OFFSET_DPS = 0.42f;
+static constexpr float MPU_GY_OFFSET_DPS = -0.35f;
+static constexpr float MPU_GZ_OFFSET_DPS = 0.18f;
+static constexpr float MPU_ROLL_ZERO_DEG = -0.72f;
+static constexpr float MPU_PITCH_ZERO_DEG = 1.13f;
+
 static constexpr int SOIL_ADC_PIN = 34;     // ADC1_CH6, input only.
-static constexpr int BATTERY_ADC_PIN = 35;  // ADC1_CH7, input only.
 static constexpr int SENSOR_POWER_PIN = -1; // Set to a GPIO if sensor VCC is switched by MOSFET.
 
 // Calibrate these two values with your real soil sensor.
 // For many capacitive probes: dry ADC is high, wet ADC is low.
 static constexpr int SOIL_ADC_DRY = 3400;
-static constexpr int SOIL_ADC_WET = 1200;
+static constexpr int SOIL_ADC_WET = 1400;
 static constexpr int SOIL_ADC_MIN_VALID = 100;
 static constexpr int SOIL_ADC_MAX_VALID = 4090;
 static constexpr uint8_t SOIL_SAMPLE_COUNT = 11;
@@ -58,22 +69,13 @@ static constexpr uint8_t SOIL_DISCARD_SAMPLE_COUNT = 3;
 static constexpr uint8_t SOIL_MAX_READ_ERRORS = 3;
 static constexpr uint32_t SOIL_RETRY_DELAY_MS = 400;
 
-// Battery divider: VBAT+ -- 220k -- GPIO35 -- 100k -- GND.
-static constexpr float BAT_DIVIDER_R_TOP_OHM = 220000.0f;
-static constexpr float BAT_DIVIDER_R_BOTTOM_OHM = 100000.0f;
-// Adjust only after comparing GPIO35 millivolts and battery voltage with a multimeter.
-static constexpr float BATTERY_VOLTAGE_CALIBRATION = 1.000f;
-static constexpr float BATTERY_LOW_V = 3.50f;
-static constexpr float BATTERY_CRITICAL_V = 3.30f;
-static constexpr float BATTERY_SANITY_MIN_V = 3.00f;
-static constexpr float BATTERY_SANITY_MAX_V = 4.25f;
-
 // ---------- Sampling / retry ----------
 static constexpr uint32_t SENSOR_WARMUP_MS = 800;
 static constexpr uint32_t MPU_SAMPLE_INTERVAL_MS = 200;
 static constexpr uint32_t MPU_WINDOW_MS = 2000;
 static constexpr uint32_t ACK_TIMEOUT_MS = 2500;
-static constexpr uint8_t LORA_MAX_RETRY = 3;
+static constexpr uint8_t NODE_MEASUREMENTS_PER_WAKE = 10;
+static constexpr uint32_t NODE_INTER_MEASUREMENT_DELAY_MS = 1000;
 
 static constexpr uint32_t SLEEP_NORMAL_SEC = 30UL * 60UL;
 static constexpr uint32_t SLEEP_WARNING_SEC = 20UL * 60UL;
@@ -111,9 +113,6 @@ static constexpr float BETA_MAX_DEG = 60.0f;
 static constexpr float BETA_DOT_SANITY_MAX_DEG_PER_HOUR = 360.0f;
 static constexpr float A_RMS_MIN_G = 0.0f;
 static constexpr float A_RMS_MAX_G = 1.0f;
-
-// OTA is not implemented in the current superloop firmware.
-static constexpr bool OTA_SUPPORTED = false;
 
 // Gateway RAM offline queue. Persistence across reset remains a future design item.
 static constexpr size_t GATEWAY_OFFLINE_QUEUE_CAPACITY = 8;

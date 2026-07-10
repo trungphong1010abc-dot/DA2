@@ -38,6 +38,16 @@ size_t offlineHead = 0;
 size_t offlineCount = 0;
 uint32_t offlineDropped = 0;
 
+uint8_t readLoraRegisterRaw(uint8_t address) {
+  SPI.beginTransaction(SPISettings(1000000, MSBFIRST, SPI_MODE0));
+  digitalWrite(Config::GATEWAY_LORA_CS_PIN, LOW);
+  SPI.transfer(address & 0x7f);
+  const uint8_t value = SPI.transfer(0x00);
+  digitalWrite(Config::GATEWAY_LORA_CS_PIN, HIGH);
+  SPI.endTransaction();
+  return value;
+}
+
 bool isDuplicatePacket(uint8_t nodeId, uint32_t packetId) {
   for (uint8_t i = 0; i < recentPacketCount[nodeId]; ++i) {
     if (recentPacketIds[nodeId][i] == packetId) {
@@ -120,11 +130,21 @@ bool initLora() {
   SPI.begin(Config::LORA_SCK_PIN,
             Config::LORA_MISO_PIN,
             Config::LORA_MOSI_PIN,
-            Config::LORA_CS_PIN);
-  LoRa.setPins(Config::LORA_CS_PIN, Config::LORA_RST_PIN, Config::LORA_DIO0_PIN);
+            Config::GATEWAY_LORA_CS_PIN);
+  LoRa.setPins(Config::GATEWAY_LORA_CS_PIN, Config::LORA_RST_PIN, Config::LORA_DIO0_PIN);
+  LoRa.setSPIFrequency(1000000);
+
+  Serial.printf("[LoRa] pins sck=%d miso=%d mosi=%d nss=%d rst=%d dio0=%d spi=%luHz\n",
+                Config::LORA_SCK_PIN,
+                Config::LORA_MISO_PIN,
+                Config::LORA_MOSI_PIN,
+                Config::GATEWAY_LORA_CS_PIN,
+                Config::LORA_RST_PIN,
+                Config::LORA_DIO0_PIN,
+                1000000UL);
 
   if (!LoRa.begin(Config::LORA_FREQUENCY_HZ)) {
-    Serial.println("[LoRa] init failed");
+    Serial.printf("[LoRa] init failed version=0x%02X\n", readLoraRegisterRaw(0x42));
     return false;
   }
 
@@ -290,7 +310,6 @@ String buildThingsBoardPayload(const Protocol::SensorPacket &data,
   appendJsonNumber(json, "a_rms_g", data.vibrationRmsG, 5);
   appendJsonNumber(json, "pitch_deg", data.pitchDeg, 3);
   appendJsonNumber(json, "roll_deg", data.rollDeg, 3);
-  appendJsonNumber(json, "v_bat", data.batteryV, 3);
   appendJsonNumber(json, "lora_rssi", static_cast<int32_t>(data.rssi));
   appendJsonNumber(json, "error_flag", static_cast<uint32_t>(data.errorFlags));
   appendJsonText(json, "error_text", Analysis::errorFlagsToText(data.errorFlags));
@@ -306,12 +325,8 @@ String buildThingsBoardPayload(const Protocol::SensorPacket &data,
   appendJsonNumber(json, "epsilon_star", analysis.strainIndex, 5);
   appendJsonText(json, "alert_level", analysis.alertLevel);
   appendJsonText(json, "risk_status", analysis.riskStatus);
-  appendJsonText(json, "warning_message", analysis.warningMessage);
   appendJsonText(json, "duty_cycle_mode", analysis.dutyCycleMode);
   appendJsonNumber(json, "sleep_duration_sec", analysis.nextSleepSeconds);
-  appendJsonText(json, "battery_status", analysis.batteryStatus);
-  appendJsonBool(json, "ota_supported", analysis.otaSupported);
-  appendJsonBool(json, "ota_locked", analysis.otaLocked);
   json += '}';
   return json;
 }
@@ -320,7 +335,7 @@ void printAllVariables(const Protocol::SensorPacket &data, const Analysis::Resul
   Serial.printf("[RAW] gateway_id=%u node_id=%u packet_id=%lu timestamp_ms=%lu "
                 "soil_adc_filtered=%d h_soil=%.2f beta_deg=%.3f "
                 "beta_dot_deg_per_hour=%.4f a_rms_g=%.5f pitch_deg=%.3f "
-                "roll_deg=%.3f v_bat=%.3f lora_rssi=%d error_flag=%u error_text=%s\n",
+                "roll_deg=%.3f lora_rssi=%d error_flag=%u error_text=%s\n",
                 data.gatewayId,
                 data.nodeId,
                 static_cast<unsigned long>(data.packetId),
@@ -332,7 +347,6 @@ void printAllVariables(const Protocol::SensorPacket &data, const Analysis::Resul
                 data.vibrationRmsG,
                 data.pitchDeg,
                 data.rollDeg,
-                data.batteryV,
                 data.rssi,
                 data.errorFlags,
                 Analysis::errorFlagsToText(data.errorFlags));
@@ -355,15 +369,10 @@ void printAllVariables(const Protocol::SensorPacket &data, const Analysis::Resul
     Serial.println("fs=invalid di=invalid epsilon_star=invalid");
   }
 
-  Serial.printf("[STATE] alert_level=%s risk_status=%s warning_message=%s "
-                "battery_status=%s ota_supported=%s ota_locked=%s "
+  Serial.printf("[STATE] alert_level=%s risk_status=%s "
                 "duty_cycle_mode=%s sleep_duration_sec=%lu\n",
                 result.alertLevel.c_str(),
                 result.riskStatus.c_str(),
-                result.warningMessage.c_str(),
-                result.batteryStatus.c_str(),
-                result.otaSupported ? "true" : "false",
-                result.otaLocked ? "true" : "false",
                 result.dutyCycleMode.c_str(),
                 static_cast<unsigned long>(result.nextSleepSeconds));
 }
@@ -409,10 +418,6 @@ void processGatewayPacket(const String &packet, int rssi) {
   data.rssi = rssi;
   if (!sensorValuesInRange(data)) {
     data.errorFlags |= Protocol::ERR_DATA_RANGE;
-  }
-  if (!isfinite(data.batteryV) || data.batteryV < Config::BATTERY_SANITY_MIN_V ||
-      data.batteryV > Config::BATTERY_SANITY_MAX_V) {
-    data.errorFlags |= Protocol::ERR_BATTERY;
   }
 
   const bool duplicate = isDuplicatePacket(data.nodeId, data.packetId);

@@ -188,7 +188,6 @@ String buildDataPacket(const SensorPacket &data) {
   packet += "|arms=" + floatField(data.vibrationRmsG, 5);
   packet += "|pitch=" + floatField(data.pitchDeg, 3);
   packet += "|roll=" + floatField(data.rollDeg, 3);
-  packet += "|vbat=" + floatField(data.batteryV, 3);
   packet += "|err=" + String(data.errorFlags);
   return appendCrc(packet);
 }
@@ -232,7 +231,6 @@ bool parseDataPacket(const String &packet, SensorPacket &data) {
   ok &= parseFloat(getField(packet, "arms"), data.vibrationRmsG);
   ok &= parseFloat(getField(packet, "pitch"), data.pitchDeg);
   ok &= parseFloat(getField(packet, "roll"), data.rollDeg);
-  ok &= parseFloat(getField(packet, "vbat"), data.batteryV);
   ok &= parseUint16(getField(packet, "err"), err);
   data.errorFlags = err;
   return ok;

@@ -35,6 +35,7 @@ RTC_DATA_ATTR char rtcPendingPacket[640] = {0};
 
 bool loraReady = false;
 bool mpuReady = false;
+uint32_t previousBetaSampleMs = 0;
 
 float clampFloat(float value, float minValue, float maxValue) {
   if (value < minValue) {
@@ -57,7 +58,21 @@ void powerSensors(bool enabled) {
 void configureAdc() {
   analogReadResolution(12);
   analogSetPinAttenuation(Config::SOIL_ADC_PIN, ADC_11db);
-  analogSetPinAttenuation(Config::BATTERY_ADC_PIN, ADC_11db);
+}
+
+void printMpuCalibrationProfile() {
+  Serial.println("[CALIB] MPU6050 configured calibration profile");
+  Serial.printf("[CALIB] accel_offset_g ax=%.3f ay=%.3f az=%.3f\n",
+                Config::MPU_AX_OFFSET_G,
+                Config::MPU_AY_OFFSET_G,
+                Config::MPU_AZ_OFFSET_G);
+  Serial.printf("[CALIB] gyro_offset_dps gx=%.3f gy=%.3f gz=%.3f\n",
+                Config::MPU_GX_OFFSET_DPS,
+                Config::MPU_GY_OFFSET_DPS,
+                Config::MPU_GZ_OFFSET_DPS);
+  Serial.printf("[CALIB] angle_zero_deg roll0=%.3f pitch0=%.3f\n",
+                Config::MPU_ROLL_ZERO_DEG,
+                Config::MPU_PITCH_ZERO_DEG);
 }
 
 void sortIntArray(int *values, uint8_t count) {
@@ -155,9 +170,9 @@ bool readAccel(float &axG, float &ayG, float &azG) {
   const int16_t ayRaw = static_cast<int16_t>((Wire.read() << 8) | Wire.read());
   const int16_t azRaw = static_cast<int16_t>((Wire.read() << 8) | Wire.read());
 
-  axG = static_cast<float>(axRaw) / 16384.0f;
-  ayG = static_cast<float>(ayRaw) / 16384.0f;
-  azG = static_cast<float>(azRaw) / 16384.0f;
+  axG = static_cast<float>(axRaw) / 16384.0f - Config::MPU_AX_OFFSET_G;
+  ayG = static_cast<float>(ayRaw) / 16384.0f - Config::MPU_AY_OFFSET_G;
+  azG = static_cast<float>(azRaw) / 16384.0f - Config::MPU_AZ_OFFSET_G;
   return true;
 }
 
@@ -238,8 +253,8 @@ MpuReadout readMpuWindow() {
 
     const float pitchRad = atan2f(-axFiltered, sqrtf(ayFiltered * ayFiltered + azFiltered * azFiltered));
     const float rollRad = atan2f(ayFiltered, sqrtf(axFiltered * axFiltered + azFiltered * azFiltered));
-    const float pitchDeg = pitchRad * 180.0f / PI;
-    const float rollDeg = rollRad * 180.0f / PI;
+    const float pitchDeg = pitchRad * 180.0f / PI - Config::MPU_PITCH_ZERO_DEG;
+    const float rollDeg = rollRad * 180.0f / PI - Config::MPU_ROLL_ZERO_DEG;
     const float betaDeg = sqrtf(pitchDeg * pitchDeg + rollDeg * rollDeg);
 
     const float axVib = ax - axFiltered;
@@ -263,30 +278,18 @@ MpuReadout readMpuWindow() {
   result.vibrationRmsG = sqrtf(vibrationSquaredSum / static_cast<float>(sampleCount));
 
   if (rtcHasPreviousBeta) {
-    const float cycleHours =
-        (static_cast<float>(rtcSleepSeconds) + Config::MPU_WINDOW_MS / 1000.0f) / 3600.0f;
-    result.betaDotDegPerHour = (lastBeta - rtcPreviousBetaDeg) / cycleHours;
+    const uint32_t endMs = millis();
+    float dtSeconds = static_cast<float>(rtcSleepSeconds) + Config::MPU_WINDOW_MS / 1000.0f;
+    if (previousBetaSampleMs != 0 && endMs > previousBetaSampleMs) {
+      dtSeconds = static_cast<float>(endMs - previousBetaSampleMs) / 1000.0f;
+    }
+    result.betaDotDegPerHour = (lastBeta - rtcPreviousBetaDeg) * 3600.0f / dtSeconds;
   } else {
     result.betaDotDegPerHour = 0.0f;
   }
 
   result.ok = true;
   return result;
-}
-
-float readBatteryVoltage() {
-  uint32_t millivoltSum = 0;
-  constexpr uint8_t sampleCount = 16;
-  for (uint8_t i = 0; i < sampleCount; ++i) {
-    millivoltSum += analogReadMilliVolts(Config::BATTERY_ADC_PIN);
-    delay(5);
-  }
-  const float adcVoltage =
-      (static_cast<float>(millivoltSum) / static_cast<float>(sampleCount)) / 1000.0f;
-  const float dividerRatio =
-      (Config::BAT_DIVIDER_R_TOP_OHM + Config::BAT_DIVIDER_R_BOTTOM_OHM) /
-      Config::BAT_DIVIDER_R_BOTTOM_OHM;
-  return adcVoltage * dividerRatio * Config::BATTERY_VOLTAGE_CALIBRATION;
 }
 
 bool initLora() {
@@ -329,41 +332,37 @@ bool sendPacketAndWaitAck(const String &packet,
     return false;
   }
 
-  for (uint8_t retry = 0; retry < Config::LORA_MAX_RETRY; ++retry) {
-    Serial.printf("[LoRa] TX attempt=%u/%u packet_id=%lu\n",
-                  retry + 1,
-                  Config::LORA_MAX_RETRY,
-                  static_cast<unsigned long>(expectedPacketId));
-    LoRa.idle();
-    LoRa.beginPacket();
-    LoRa.print(packet);
-    LoRa.endPacket();
-    LoRa.receive();
+  Serial.printf("[LoRa] TX packet_id=%lu\n",
+                static_cast<unsigned long>(expectedPacketId));
+  LoRa.idle();
+  LoRa.beginPacket();
+  LoRa.print(packet);
+  LoRa.endPacket();
+  LoRa.receive();
 
-    const uint32_t start = millis();
-    while (millis() - start < Config::ACK_TIMEOUT_MS) {
-      const String incoming = readLoraPacket();
-      if (incoming.length() == 0) {
-        delay(10);
-        continue;
-      }
-
-      Protocol::AckPacket parsedAck;
-      if (Protocol::parseAckPacket(incoming, parsedAck) &&
-          parsedAck.gatewayId == Config::GATEWAY_ID &&
-          parsedAck.nodeId == Config::NODE_ID &&
-          parsedAck.packetId == expectedPacketId &&
-          (parsedAck.status == "OK" || parsedAck.status == "DUPLICATE")) {
-        ack = parsedAck;
-        Serial.printf("[LoRa] ACK status=%s sleep=%.1f minutes alert=%s\n",
-                      ack.status.c_str(),
-                      ack.sleepSeconds / 60.0f,
-                      ack.alertLevel.c_str());
-        return true;
-      }
-
-      Serial.printf("[LoRa] ignored packet: %s\n", incoming.c_str());
+  const uint32_t start = millis();
+  while (millis() - start < Config::ACK_TIMEOUT_MS) {
+    const String incoming = readLoraPacket();
+    if (incoming.length() == 0) {
+      delay(10);
+      continue;
     }
+
+    Protocol::AckPacket parsedAck;
+    if (Protocol::parseAckPacket(incoming, parsedAck) &&
+        parsedAck.gatewayId == Config::GATEWAY_ID &&
+        parsedAck.nodeId == Config::NODE_ID &&
+        parsedAck.packetId == expectedPacketId &&
+        (parsedAck.status == "OK" || parsedAck.status == "DUPLICATE")) {
+      ack = parsedAck;
+      Serial.printf("[LoRa] ACK status=%s sleep=%.1f minutes alert=%s\n",
+                    ack.status.c_str(),
+                    ack.sleepSeconds / 60.0f,
+                    ack.alertLevel.c_str());
+      return true;
+    }
+
+    Serial.printf("[LoRa] ignored packet: %s\n", incoming.c_str());
   }
 
   return false;
@@ -431,6 +430,12 @@ uint32_t localSleepFallback(const Protocol::SensorPacket &data) {
   return Analysis::evaluate(data).nextSleepSeconds;
 }
 
+void rememberMpuBaseline(float betaDeg) {
+  rtcPreviousBetaDeg = betaDeg;
+  rtcHasPreviousBeta = true;
+  previousBetaSampleMs = millis();
+}
+
 void sleepOrDelay(uint32_t sleepSeconds) {
   sleepSeconds = constrain(sleepSeconds, Config::SLEEP_DANGER_SEC, Config::SLEEP_NORMAL_SEC);
   rtcSleepSeconds = sleepSeconds;
@@ -451,70 +456,70 @@ void sleepOrDelay(uint32_t sleepSeconds) {
 void runCycle() {
   flushPendingPacket();
 
-  Protocol::SensorPacket data;
-  data.gatewayId = Config::GATEWAY_ID;
-  data.nodeId = Config::NODE_ID;
-  data.packetId = ++rtcPacketId;
-  data.timestampMs = millis();
+  uint32_t nextSleep = Config::SLEEP_NORMAL_SEC;
 
-  const SoilReadout soil = readSoil();
-  data.soilAdc = soil.adcFiltered;
-  data.soilPercent = soil.moisturePercent;
-  if (!soil.ok) {
-    data.errorFlags |= Protocol::ERR_SOIL;
-  }
+  for (uint8_t sampleIndex = 0; sampleIndex < Config::NODE_MEASUREMENTS_PER_WAKE; ++sampleIndex) {
+    Protocol::SensorPacket data;
+    data.gatewayId = Config::GATEWAY_ID;
+    data.nodeId = Config::NODE_ID;
+    data.packetId = ++rtcPacketId;
+    data.timestampMs = millis();
 
-  const MpuReadout mpu = readMpuWindow();
-  data.betaDeg = mpu.betaDeg;
-  data.betaDotDegPerHour = mpu.betaDotDegPerHour;
-  data.vibrationRmsG = mpu.vibrationRmsG;
-  data.pitchDeg = mpu.pitchDeg;
-  data.rollDeg = mpu.rollDeg;
-  if (!mpu.ok) {
-    data.errorFlags |= Protocol::ERR_MPU;
-  }
+    const SoilReadout soil = readSoil();
+    data.soilAdc = soil.adcFiltered;
+    data.soilPercent = soil.moisturePercent;
+    if (!soil.ok) {
+      data.errorFlags |= Protocol::ERR_SOIL;
+    }
 
-  data.batteryV = readBatteryVoltage();
-  if (!isfinite(data.batteryV) || data.batteryV < Config::BATTERY_SANITY_MIN_V ||
-      data.batteryV > Config::BATTERY_SANITY_MAX_V) {
-    data.errorFlags |= Protocol::ERR_BATTERY;
-  }
+    const MpuReadout mpu = readMpuWindow();
+    data.betaDeg = mpu.betaDeg;
+    data.betaDotDegPerHour = mpu.betaDotDegPerHour;
+    data.vibrationRmsG = mpu.vibrationRmsG;
+    data.pitchDeg = mpu.pitchDeg;
+    data.rollDeg = mpu.rollDeg;
+    if (!mpu.ok) {
+      data.errorFlags |= Protocol::ERR_MPU;
+    } else {
+      rememberMpuBaseline(data.betaDeg);
+    }
 
-  validateSnapshot(data);
+    validateSnapshot(data);
 
-  Protocol::AckPacket ack;
-  bool ackOk = sendTelemetryAndWaitAck(data, ack);
-  uint32_t nextSleep = localSleepFallback(data);
-  if (!ackOk) {
-    data.errorFlags |= Protocol::ERR_LORA;
-    storePendingPacket(Protocol::buildDataPacket(data));
-    Serial.printf("[LoRa] no ACK after %u attempts; error_flag=%u (%s), using local sleep fallback\n",
-                  Config::LORA_MAX_RETRY,
+    Protocol::AckPacket ack;
+    bool ackOk = sendTelemetryAndWaitAck(data, ack);
+    nextSleep = localSleepFallback(data);
+    if (!ackOk) {
+      data.errorFlags |= Protocol::ERR_LORA;
+      storePendingPacket(Protocol::buildDataPacket(data));
+      Serial.printf("[LoRa] no ACK; error_flag=%u (%s), using local sleep fallback\n",
+                    data.errorFlags,
+                    Analysis::errorFlagsToText(data.errorFlags));
+    } else if (ack.sleepSeconds > 0) {
+      nextSleep = ack.sleepSeconds;
+    }
+
+    Serial.printf("[DATA] sample=%u/%u packet_id=%lu soil_adc_filtered=%d h_soil=%.2f beta_deg=%.3f "
+                  "beta_dot_deg_per_hour=%.4f a_rms_g=%.5f pitch_deg=%.3f "
+                  "roll_deg=%.3f error_flag=%u error_text=%s\n",
+                  sampleIndex + 1,
+                  Config::NODE_MEASUREMENTS_PER_WAKE,
+                  static_cast<unsigned long>(data.packetId),
+                  data.soilAdc,
+                  data.soilPercent,
+                  data.betaDeg,
+                  data.betaDotDegPerHour,
+                  data.vibrationRmsG,
+                  data.pitchDeg,
+                  data.rollDeg,
                   data.errorFlags,
                   Analysis::errorFlagsToText(data.errorFlags));
-  } else if (ack.sleepSeconds > 0) {
-    nextSleep = ack.sleepSeconds;
+
+    if (sampleIndex + 1 < Config::NODE_MEASUREMENTS_PER_WAKE) {
+      delay(Config::NODE_INTER_MEASUREMENT_DELAY_MS);
+    }
   }
 
-  if (mpu.ok) {
-    rtcPreviousBetaDeg = data.betaDeg;
-    rtcHasPreviousBeta = true;
-  }
-
-  Serial.printf("[DATA] packet_id=%lu soil_adc_filtered=%d h_soil=%.2f beta_deg=%.3f "
-                "beta_dot_deg_per_hour=%.4f a_rms_g=%.5f pitch_deg=%.3f "
-                "roll_deg=%.3f v_bat=%.3f error_flag=%u error_text=%s\n",
-                static_cast<unsigned long>(data.packetId),
-                data.soilAdc,
-                data.soilPercent,
-                data.betaDeg,
-                data.betaDotDegPerHour,
-                data.vibrationRmsG,
-                data.pitchDeg,
-                data.rollDeg,
-                data.batteryV,
-                data.errorFlags,
-                Analysis::errorFlagsToText(data.errorFlags));
   sleepOrDelay(nextSleep);
 }
 
@@ -526,6 +531,7 @@ void setup() {
   Serial.printf("\n[%s NODE] boot packetId=%lu\n",
                 Config::PROJECT_TAG,
                 static_cast<unsigned long>(rtcPacketId));
+  printMpuCalibrationProfile();
 
   powerSensors(true);
   configureAdc();

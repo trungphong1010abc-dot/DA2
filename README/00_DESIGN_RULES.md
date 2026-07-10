@@ -54,7 +54,7 @@ Khi có xung đột, áp dụng thứ tự ưu tiên sau:
 1. Dữ liệu đo thực tế và trạng thái lỗi không được làm sai lệch.
 2. Công thức, đơn vị và ngưỡng đã được chốt trong flowchart/Code.pdf.
 3. Tính toàn vẹn packet, khả năng truy vết và chống xử lý trùng.
-4. An toàn nguồn, pin và chu kỳ ngủ.
+4. An toàn nguồn và chu kỳ ngủ.
 5. Khả năng gửi dữ liệu và phục hồi khi mất kết nối.
 6. Tối ưu hiệu năng, bộ nhớ và năng lượng.
 
@@ -71,7 +71,7 @@ Mỗi biến phải thuộc đúng một nhóm:
 - **Filtered data**: dữ liệu sau bộ lọc, phải giữ được raw data để truy vết.
 - **Derived data**: dữ liệu tính từ raw/filtered data.
 - **Analysis data**: kết quả mô hình địa kỹ thuật và chỉ số cảnh báo.
-- **State data**: trạng thái cảm biến, node, mạng, pin, cảnh báo và duty cycle.
+- **State data**: trạng thái cảm biến, node, mạng, cảnh báo và duty cycle.
 - **Control data**: command, ACK, retry, sleep duration và cấu hình từ xa.
 
 Không được ghi đè raw data bằng filtered data hoặc analysis data.
@@ -97,7 +97,6 @@ các tên chuẩn sau:
 | MPU | `beta_deg` | Độ nghiêng tổng | độ |
 | MPU | `beta_dot_deg_per_hour` | Tốc độ đổi góc | độ/giờ |
 | MPU | `a_rms_g` | Chỉ số rung RMS | g |
-| Nguồn | `v_bat` | Điện áp pin | V |
 | RF | `lora_rssi` | Cường độ tín hiệu nhận | dBm |
 | Lỗi | `error_flag` | Bitmask lỗi | Không đơn vị |
 | Phân tích | `u_kpa` | Áp lực nước lỗ rỗng | kPa |
@@ -177,7 +176,7 @@ Quy tắc:
 
 ```text
 ADC_dry = 3400
-ADC_wet = 1200
+ADC_wet = 1400
 ```
 
 - Hai giá trị trên chỉ áp dụng cho đúng cảm biến và điều kiện hiệu chuẩn tương
@@ -281,7 +280,6 @@ Trước khi đóng packet, node phải kiểm tra tối thiểu:
 0° <= beta_deg <= 60°
 abs(beta_dot_deg_per_hour) <= 360°/h
 0 g <= a_rms_g <= 1 g
-3.0 V <= v_bat <= 4.25 V
 ```
 
 Các khoảng trên là **miền kiểm tra tính hợp lý của dữ liệu** (sanity check),
@@ -298,8 +296,8 @@ hệ thống chỉ được kết luận dữ liệu/cấu hình/cách lắp c�
 
 ```text
 ADC_dry = 3400
-ADC_wet = 1200
-H_soil = (3400 - ADC_filtered) × 100 / 2200
+ADC_wet = 1400
+H_soil = (3400 - ADC_filtered) × 100 / 2000
 ```
 
 - Giá trị tính trước clamp có thể nhỏ hơn 0% hoặc lớn hơn 100% khi ADC vượt hai
@@ -366,24 +364,6 @@ beta_dot_sanity_max = 360°/h = 0.1°/s
   1 g. Mẫu gia tốc thô từng trục vẫn phải được kiểm tra riêng với full-scale
   `±2 g` của cấu hình.
 
-### 6.5 Vì sao chọn `3.0 V <= v_bat <= 4.25 V`
-
-- Khoảng này chốt theo giả định node sử dụng một cell Li-ion/LiPo danh định
-  3.7 V và được sạc tới khoảng 4.2 V.
-- Cận trên chọn 4.25 V để có dung sai đo nhỏ quanh mức sạc 4.2 V. Datasheet bộ
-  sạc một cell TI BQ2407x dùng mức regulation 4.2 V và thể hiện giá trị cực đại
-  khoảng 4.23 V cho biến thể tương ứng; vì vậy đo trên 4.25 V cần xem là bất
-  thường hoặc sai hệ số chia áp.
-- Cận dưới chọn 3.0 V làm sanity limit bảo thủ cho một cell Li-ion gần cạn. Nó
-  thấp hơn ngưỡng điều khiển pin rất yếu 3.3 V để các giá trị 3.0–3.3 V vẫn
-  được truyền về với trạng thái `BATTERY_CRITICAL` thay vì bị loại ngay.
-- Các ngưỡng điều khiển vẫn tách riêng: pin yếu dưới 3.5 V và pin rất yếu dưới
-  3.3 V.
-- Nếu dùng loại pin khác, số cell khác, LiFePO4, nguồn USB hoặc mạch bảo vệ có
-  ngưỡng khác, toàn bộ miền 3.0–4.25 V phải được thay đổi.
-- Điện áp ngoài miền có thể do sai hệ số chia áp, sai ADC reference, đấu dây,
-  pin quá áp/quá xả hoặc loại nguồn không đúng cấu hình.
-
 ### 6.6 Trạng thái chốt của các miền validation
 
 | Đại lượng | Nguồn miền hiện tại | Trạng thái | Có dùng trực tiếp làm cảnh báo? |
@@ -392,16 +372,12 @@ beta_dot_sanity_max = 360°/h = 0.1°/s
 | `beta_deg` 0–60° | Flowchart + miền mô hình DA2 | Chốt cho phiên bản hiện tại | Không |
 | `beta_dot` ±360°/h | Suy luận từ 0.1°/s và ngưỡng DI 2°/h | Chốt cho phiên bản hiện tại | Không; chỉ kiểm tra mẫu |
 | `a_rms_g` 0–1 g | Flowchart + MPU6050 cấu hình ±2 g | Chốt cho phiên bản hiện tại | Không |
-| `v_bat` 3.0–4.25 V | Pin Li-ion/LiPo 1 cell, sạc 4.2 V | Chốt nếu đúng loại pin | Pin có nhánh cảnh báo riêng |
 
 ### 6.7 Nguồn và mức độ tin cậy
 
 - TDK InvenSense MPU-6050: nguồn xác nhận cảm biến hỗ trợ các thang gia tốc;
   firmware DA2 đang chọn `±2 g`. Datasheet không quy định ngưỡng sạt lở:
   <https://invensense.tdk.com/en-us/products/motion-tracking/6-axis/mpu-6050/>
-- Texas Instruments BQ2407x: nguồn tham khảo mức regulation 4.2 V cho bộ sạc
-  Li-ion một cell:
-  <https://www.ti.com/lit/ds/symlink/bq24074.pdf>
 - Các cận 60°, 360°/h và 1 g là quyết định kỹ thuật của đồ án dựa trên flowchart,
   cấu hình cảm biến và khoảng cách đủ lớn so với ngưỡng DI; chúng không phải
   ngưỡng sạt lở được công bố bởi nhà sản xuất.
@@ -419,7 +395,6 @@ lượng, nguồn công thức và ví dụ tính nằm trong
 | --- | --- | --- | --- |
 | Soil sensor | `soil_adc_filtered`, `h_soil` | ADC `100..4090`; `0..100%`; mốc mô hình `65%` và `95%` | Kiểm tra cảm biến và làm đầu vào tính `u_kpa` |
 | MPU slope | `beta_deg`, `beta_dot_deg_per_hour`, `a_rms_g` | `0..60°`; sanity `360°/h`; `0..1 g` | Kiểm tra miền dữ liệu và tạo DI |
-| Battery | `v_bat` | sanity `3.0..4.25 V`; low `<3.5 V`; critical `<3.3 V` | Ưu tiên trạng thái nguồn và duty cycle |
 | FS model | `u_kpa`, `tau_kpa`, `sigma_n_kpa`, `sigma_effective_kpa`, `tau_f_kpa`, `fs` | `FS > 1.3` normal; `1.0 < FS <= 1.3` warning; `FS <= 1.0` danger | Đánh giá ổn định cơ học |
 | Dynamic model | `di`, `epsilon_star` | `DI < 0.5`; `DI >= 1.0`; `epsilon_star = 1 / FS` | Phát hiện chuyển động bất thường và hiển thị mức nguy cơ |
 | Error state | `error_flag`, `analysis_valid` | `error_flag = 0` mới được phân loại normal | Chặn kết luận an toàn khi dữ liệu không đáng tin |
@@ -431,7 +406,7 @@ Ngưỡng cấu hình hiện tại:
 | `ADC_min` | 100 | count | `SOIL_ADC_MIN_VALID` |
 | `ADC_max` | 4090 | count | `SOIL_ADC_MAX_VALID` |
 | `ADC_dry` | 3400 | count | `SOIL_ADC_DRY` |
-| `ADC_wet` | 1200 | count | `SOIL_ADC_WET` |
+| `ADC_wet` | 1400 | count | `SOIL_ADC_WET` |
 | `H_c` | 65 | % | `MOISTURE_DANGER_START_PERCENT` |
 | `H_sat` | 95 | % | `MOISTURE_SATURATION_PERCENT` |
 | `u_max` | 10 | kPa | `PORE_PRESSURE_MAX_KPA` |
@@ -449,12 +424,10 @@ Ngưỡng cấu hình hiện tại:
 | `DI_danger` | 1.0 | Không đơn vị | `DI_DANGER` |
 | `epsilon_warning` | 0.77 | Không đơn vị | `STRAIN_WARNING` |
 | `epsilon_danger` | 1.0 | Không đơn vị | `STRAIN_DANGER` |
-| `V_bat_low` | 3.5 | V | `BATTERY_LOW_V` |
-| `V_bat_critical` | 3.3 | V | `BATTERY_CRITICAL_V` |
 
 Trước khi coi các ngưỡng là chính thức ngoài mô hình thử nghiệm, cần hiệu chuẩn
 ADC dry/wet, đo rung nền, kiểm tra độ trôi góc, fit quan hệ `H_soil -> u`, xác
-nhận tham số đất và kiểm tra pin dưới tải phát LoRa.
+nhận tham số đất và kiểm tra độ ổn định nguồn dưới tải phát LoRa.
 
 ## 7. Giao thức Node → Gateway
 
@@ -465,7 +438,7 @@ Packet phải có tối thiểu:
 ```text
 Header, Gateway_ID, Node_ID, Packet_ID, timestamp,
 H_soil, beta, beta_dot, A_rms, pitch_deg, roll_deg,
-V_bat, Error_Flag, CRC
+Error_Flag, CRC
 ```
 
 Gateway bổ sung RSSI tại thời điểm nhận; node không tự khai RSSI chiều nhận.
@@ -593,7 +566,7 @@ giải chi tiết các đại lượng từ `u_kpa` đến `epsilon_star` nằm 
 | `DESIGN_ASSUMPTION` | Giả định tạm để mô phỏng |
 
 Mỗi tham số phải có giá trị, đơn vị, loại nguồn, phương pháp, mẫu đất, ngày đo,
-thiết bị, số lần lặp và sai số. Hiện chỉ `ADC_wet=1200` và `ADC_dry=3400` được
+thiết bị, số lần lặp và sai số. Hiện chỉ `ADC_wet=1400` và `ADC_dry=3400` được
 xác nhận là `MEASURED_SENSOR` theo thông tin người dùng cung cấp.
 
 Tài liệu phương pháp tham khảo:
@@ -636,7 +609,7 @@ DI < 0.5
 epsilon_star < 0.77
 ```
 
-Sensor error, analysis invalid và battery state là các trạng thái ưu tiên riêng;
+Sensor error và analysis invalid là các trạng thái ưu tiên riêng;
 không được báo `NORMAL` khi dữ liệu không đủ để phân loại.
 
 ## 10. Adaptive Duty Cycle
@@ -644,13 +617,11 @@ không được báo `NORMAL` khi dữ liệu không đủ để phân loại.
 Thứ tự quyết định bắt buộc:
 
 1. Kiểm tra `error_flag`.
-2. Kiểm tra pin rất yếu `< 3.3 V`.
-3. Kiểm tra pin yếu `< 3.5 V`.
-4. Tính/đọc `FS`, `DI`, `epsilon_star`.
-5. Phân loại DANGER/WARNING/NORMAL.
-6. Giới hạn `sleep_duration` trong 5–30 phút.
-7. Lưu sleep duration vào RTC memory.
-8. Cấu hình timer wake-up và vào deep sleep.
+2. Tính/đọc `FS`, `DI`, `epsilon_star`.
+3. Phân loại DANGER/WARNING/NORMAL.
+4. Giới hạn `sleep_duration` trong 5–30 phút.
+5. Lưu sleep duration vào RTC memory.
+6. Cấu hình timer wake-up và vào deep sleep.
 
 Bảng thời gian đã được flowchart chốt:
 
@@ -660,15 +631,6 @@ Bảng thời gian đã được flowchart chốt:
 | DANGER | 5 phút |
 | WARNING | 20 phút |
 | NORMAL | 30 phút |
-
-Flowchart chưa chốt sleep duration cụ thể cho `BATTERY_CRITICAL` và
-`BATTERY_LOW`. Không được tự chọn giá trị trong implementation cuối cùng.
-Phải tạo quyết định thiết kế riêng trước khi code. Giá trị tạm thời nếu dùng để
-thử nghiệm phải được đánh dấu rõ là provisional.
-
-Khi pin `< 3.5 V`, trạng thái thiết kế yêu cầu khóa OTA. Chỉ được báo
-`ota_locked=true` khi cơ chế OTA thực sự kiểm tra cờ này; nếu chưa có OTA, ghi
-`ota_supported=false` thay vì tạo cảm giác đã khóa chức năng.
 
 ## 11. Gateway, ThingsBoard và lưu dữ liệu
 
@@ -692,11 +654,11 @@ ThingsBoard phải nhận cả dữ liệu gốc, dữ liệu phân tích và tr
 gateway_id, node_id, packet_id, timestamp_ms,
 soil_adc_filtered, h_soil,
 beta_deg, beta_dot_deg_per_hour, a_rms_g, pitch_deg, roll_deg,
-v_bat, lora_rssi, error_flag, error_text,
+lora_rssi, error_flag, error_text,
 u_kpa, tau_kpa, sigma_n_kpa, sigma_effective_kpa, tau_f_kpa,
 fs, di, epsilon_star, analysis_valid,
 alert_level, risk_status, warning_message,
-duty_cycle_mode, sleep_duration_sec, battery_status
+duty_cycle_mode, sleep_duration_sec
 ```
 
 ### 11.3 Offline buffer
@@ -715,7 +677,7 @@ Mỗi packet mới phải có ba nhóm log:
 ```text
 [RAW]       dữ liệu node và RSSI
 [ANALYSIS]  u, tau, sigma_n, sigma_effective, tau_f, FS, DI, epsilon_star
-[STATE]     alert, risk, battery, duty cycle, sleep duration, error
+[STATE]     alert, risk, duty cycle, sleep duration, error
 ```
 
 Log mạng chỉ cần trạng thái chuyển tiếp có ý nghĩa: Wi-Fi connected/failed,
@@ -836,16 +798,15 @@ packet format, ACK/retry và Adaptive Duty Cycle. Không được thêm task ch�
 
 Các mục sau phải được chốt bằng tài liệu trước khi triển khai hoàn chỉnh:
 
-1. Sleep duration chính thức cho pin `< 3.3 V` và `< 3.5 V`.
-2. Đơn vị validation chính thức của `beta_dot` (`°/s` hay `°/h`).
-3. Cơ chế OTA thực tế và ý nghĩa kỹ thuật của `ota_locked`.
-4. Loại local storage: RTC RAM, RAM ring buffer, NVS, LittleFS hay thẻ nhớ.
-5. Dung lượng và chính sách tràn offline buffer.
-6. Đồng bộ UTC cho node và timestamp khi deep sleep.
-7. Lưu database nằm ở gateway, ThingsBoard hay backend riêng.
-8. Chính sách command khi node đang deep sleep.
-9. Cách hỗ trợ nhiều hơn 100 node và thời hạn lưu duplicate history.
-10. Ngưỡng ADC, pin và địa kỹ thuật sau hiệu chuẩn thực nghiệm.
+1. Đơn vị validation chính thức của `beta_dot` (`°/s` hay `°/h`).
+2. Cơ chế OTA thực tế và ý nghĩa kỹ thuật của `ota_locked`.
+3. Loại local storage: RTC RAM, RAM ring buffer, NVS, LittleFS hay thẻ nhớ.
+4. Dung lượng và chính sách tràn offline buffer.
+5. Đồng bộ UTC cho node và timestamp khi deep sleep.
+6. Lưu database nằm ở gateway, ThingsBoard hay backend riêng.
+7. Chính sách command khi node đang deep sleep.
+8. Cách hỗ trợ nhiều hơn 100 node và thời hạn lưu duplicate history.
+9. Ngưỡng ADC và địa kỹ thuật sau hiệu chuẩn thực nghiệm.
 
 ## 16. Kết luận phụ lục
 

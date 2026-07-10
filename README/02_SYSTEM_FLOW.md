@@ -27,7 +27,7 @@ gọi tuần tự. FreeRTOS chỉ là phương án nâng cấp về sau.
 ```text
 [Node] RTC đánh thức ESP32
 → Khởi tạo nguồn cảm biến, ADC, I2C, MPU6050 và LoRa
-→ [Superloop] gọi lần lượt khối Soil, MPU và đọc pin
+→ [Superloop] gọi lần lượt khối Soil và MPU
 → Hợp nhất snapshot cảm biến
 → Kiểm tra miền giá trị và tạo Error_Flag
 → Gán Node_ID, Gateway_ID, Packet_ID và timestamp
@@ -88,8 +88,8 @@ Yes
 → Sắp xếp mẫu
 → Chọn median
 → Tạo soil_adc_filtered
-→ Dùng ADC_dry = 3400 và ADC_wet = 1200 đã hiệu chuẩn
-→ Tính H_soil = (3400 - ADC_filtered) × 100 / 2200
+→ Dùng ADC_dry = 3400 và ADC_wet = 1400 đã hiệu chuẩn
+→ Tính H_soil = (3400 - ADC_filtered) × 100 / 2000
 → Giới hạn H_soil vào 0–100%
 → Đặt soil_status = OK
 → Trả SoilData về biến trạng thái của chu kỳ Node
@@ -161,13 +161,11 @@ Yes
 ```text
 [Superloop/buildSensorSnapshot] Nhận SoilData
 → Nhận MPUData
-→ Đọc V_bat
 → Tạo SensorSnapshot
 → Kiểm tra H_soil
 → Kiểm tra beta
 → Kiểm tra beta_dot với đúng đơn vị đã chốt
 → Kiểm tra A_rms
-→ Kiểm tra V_bat
 → Có dữ liệu lỗi?
   Yes → Gộp bit vào Error_Flag
   No  → Error_Flag = 0
@@ -327,7 +325,7 @@ No
 ```text
 [AdaptiveDutyCycle] Nhận H_soil + beta + beta_dot + A_rms
 → Nhận FS + DI + epsilon_star
-→ Nhận V_bat + Error_Flag
+→ Nhận Error_Flag
 → Error_Flag != 0?
 ```
 
@@ -345,24 +343,14 @@ Nhánh dữ liệu hợp lệ:
 
 ```text
 No
-→ V_bat < 3.3 V?
-  Yes → Battery_Status = CRITICAL
-      → Yêu cầu khóa OTA
-      → Gửi cảnh báo pin rất yếu
-      → Sleep_Duration = DESIGN_TBD
-  No  → V_bat < 3.5 V?
-      Yes → Battery_Status = LOW
-          → Yêu cầu khóa OTA
-          → Gửi cảnh báo pin yếu
-          → Sleep_Duration = DESIGN_TBD
-      No  → DANGER?
-          Yes → Duty_Cycle_Mode = DANGER
-              → Sleep_Duration = 5 phút
-          No  → WARNING?
-              Yes → Duty_Cycle_Mode = WARNING
-                  → Sleep_Duration = 20 phút
-              No  → Duty_Cycle_Mode = NORMAL
-                  → Sleep_Duration = 30 phút
+→ DANGER?
+  Yes → Duty_Cycle_Mode = DANGER
+      → Sleep_Duration = 5 phút
+  No  → WARNING?
+      Yes → Duty_Cycle_Mode = WARNING
+          → Sleep_Duration = 20 phút
+      No  → Duty_Cycle_Mode = NORMAL
+          → Sleep_Duration = 30 phút
 ```
 
 Kết thúc duty cycle:
@@ -423,7 +411,7 @@ Telemetry upload:
 ```text
 Identity
 → Raw/filtered sensor data
-→ RF + battery + error state
+→ RF + error state
 → Geotechnical analysis
 → Alert state
 → Duty-cycle state
@@ -492,7 +480,6 @@ setup()
 → loop()/runCycle()
 → Đọc Soil
 → Đọc MPU
-→ Đọc pin
 → Hợp nhất SensorSnapshot
 → Validate + đóng packet
 → Gửi LoRa + chờ ACK/retry

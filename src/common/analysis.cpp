@@ -26,41 +26,10 @@ float calcDynamicIndex(const Protocol::SensorPacket &data) {
 }
 
 void applyAdaptiveDutyCycle(Result &result, const Protocol::SensorPacket &data) {
-  result.batteryStatus = "NORMAL";
-  result.otaSupported = Config::OTA_SUPPORTED;
-  result.otaLocked = false;
-
-  const bool batteryReadingInvalid = !isfinite(data.batteryV) ||
-                                     data.batteryV > Config::BATTERY_SANITY_MAX_V ||
-                                     data.batteryV <= 0.1f;
-
   if ((data.errorFlags & (Protocol::ERR_SOIL | Protocol::ERR_MPU |
                           Protocol::ERR_DATA_RANGE | Protocol::ERR_CONFIG)) != 0) {
     result.dutyCycleMode = "SENSOR_ERROR";
     result.nextSleepSeconds = Config::SLEEP_SENSOR_ERROR_SEC;
-    return;
-  }
-
-  if (batteryReadingInvalid) {
-    result.batteryStatus = "INVALID";
-    result.dutyCycleMode = "BATTERY_DATA_INVALID";
-    result.nextSleepSeconds = Config::SLEEP_SENSOR_ERROR_SEC;
-    return;
-  }
-
-  if (data.batteryV > 0.1f && data.batteryV < Config::BATTERY_CRITICAL_V) {
-    result.batteryStatus = "CRITICAL";
-    result.otaLocked = Config::OTA_SUPPORTED;
-    result.dutyCycleMode = "BATTERY_CRITICAL_PROVISIONAL";
-    result.nextSleepSeconds = Config::SLEEP_SENSOR_ERROR_SEC;
-    return;
-  }
-
-  if (data.batteryV > 0.1f && data.batteryV < Config::BATTERY_LOW_V) {
-    result.batteryStatus = "LOW";
-    result.otaLocked = Config::OTA_SUPPORTED;
-    result.dutyCycleMode = "BATTERY_LOW_PROVISIONAL";
-    result.nextSleepSeconds = Config::SLEEP_WARNING_SEC;
     return;
   }
 
@@ -114,37 +83,22 @@ Result evaluate(const Protocol::SensorPacket &data) {
   if (!sensorDataValid) {
     result.alertLevel = "WARNING";
     result.riskStatus = "SENSOR_ERROR";
-    result.warningMessage = "Du lieu cam bien khong hop le, can kiem tra";
-  } else if (!isfinite(data.batteryV) || data.batteryV > Config::BATTERY_SANITY_MAX_V ||
-             data.batteryV <= 0.1f) {
-    result.alertLevel = "WARNING";
-    result.riskStatus = "BATTERY_DATA_INVALID";
-    result.warningMessage = "Dien ap pin ngoai mien hop le";
-  } else if (data.batteryV > 0.1f && data.batteryV < Config::BATTERY_CRITICAL_V) {
-    result.alertLevel = "DANGER";
-    result.riskStatus = "BATTERY_CRITICAL";
-    result.warningMessage = "Pin rat yeu, can thay/sac pin";
   } else if (!result.valid) {
     result.alertLevel = "WARNING";
     result.riskStatus = "ANALYSIS_INVALID";
-    result.warningMessage = "Khong du dieu kien tinh FS va epsilon";
   } else if (result.factorOfSafety <= Config::FS_DANGER ||
              result.dynamicIndex >= Config::DI_DANGER ||
              result.strainIndex >= Config::STRAIN_DANGER) {
     result.alertLevel = "DANGER";
     result.riskStatus = "LANDSLIDE_RISK";
-    result.warningMessage = "Nguy co bien dang/sat lo cao";
   } else if (result.factorOfSafety <= Config::FS_WARNING ||
              result.dynamicIndex >= Config::DI_WARNING ||
-             result.strainIndex >= Config::STRAIN_WARNING ||
-             (data.batteryV > 0.1f && data.batteryV < Config::BATTERY_LOW_V)) {
+             result.strainIndex >= Config::STRAIN_WARNING) {
     result.alertLevel = "WARNING";
     result.riskStatus = "UNSTABLE_TREND";
-    result.warningMessage = "Dat co xu huong mat on dinh";
   } else {
     result.alertLevel = "NORMAL";
     result.riskStatus = "SAFE";
-    result.warningMessage = "Dat on dinh";
   }
 
   applyAdaptiveDutyCycle(result, data);
@@ -175,9 +129,6 @@ const char *errorFlagsToText(uint16_t flags) {
   }
   if ((flags & Protocol::ERR_MPU) != 0) {
     return "MPU";
-  }
-  if ((flags & Protocol::ERR_BATTERY) != 0) {
-    return "BATTERY";
   }
   return "MIXED";
 }

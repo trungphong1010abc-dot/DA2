@@ -11,7 +11,7 @@ chuẩn giao tiếp hoặc điện áp, phải cập nhật cả cấu hình tro
 
 ## 3.3.1 Kiến trúc phần cứng
 
-- Node: ESP32 + RA-02 LoRa + MPU6050 + cảm biến độ ẩm đất điện dung + mạch chia áp pin.
+- Node: ESP32 + RA-02 LoRa + MPU6050 + cảm biến độ ẩm đất điện dung.
 - Gateway: ESP32 + RA-02 LoRa + WiFi, nhận dữ liệu node và đẩy MQTT lên ThingsBoard.
 - Nguồn logic toàn hệ: 3.3 V. RA-02 không chịu logic 5 V.
 
@@ -22,7 +22,6 @@ chuẩn giao tiếp hoặc điện áp, phải cập nhật cả cấu hình tro
 | RA-02/SX1278 LoRa | SPI + DIO0 interrupt | SCK GPIO18, MISO GPIO19, MOSI GPIO23, CS GPIO5, RST GPIO14, DIO0 GPIO26 | Node và gateway | 433 MHz, sync word `0xDA`, SF9, BW 125 kHz, CR 4/5 |
 | MPU6050 | I2C | SDA GPIO21, SCL GPIO22, địa chỉ `0x68` khi AD0 nối GND | Node | Đọc WHO_AM_I, cấu hình accelerometer `+-2 g` |
 | Cảm biến độ ẩm đất điện dung | Analog ADC1 | AO -> GPIO34 | Node | ADC 12 bit, median 11 mẫu, DO không dùng |
-| Mạch đo pin | Analog ADC1 qua cầu chia áp | GPIO35 | Node | R1 220 kOhm, R2 100 kOhm, đọc bằng `analogReadMilliVolts()` |
 | Wi-Fi ESP32 gateway | Wi-Fi 2.4 GHz tích hợp | Không dùng GPIO ngoài | Gateway | MQTT publish lên ThingsBoard |
 
 ## 3.3.2 Kết nối LoRa RA-02 với ESP32
@@ -81,60 +80,13 @@ Kết quả hiệu chuẩn hiện tại do người dùng cung cấp:
 
 ```text
 ADC_dry = 3400
-ADC_wet = 1200
-H_soil = (3400 - ADC_filtered) * 100 / 2200
+ADC_wet = 1400
+H_soil = (3400 - ADC_filtered) * 100 / 2000
 ```
 
 Các giá trị này đang được cấu hình trong `SOIL_ADC_DRY` và `SOIL_ADC_WET`. Hồ
 sơ hiệu chuẩn nên ghi ngày đo, cảm biến, điện áp cấp, loại đất, độ sâu cắm và
 thống kê các mẫu ADC tại hai trạng thái wet/dry.
-
-### 3.3.3.3 Mạch đo điện áp pin
-
-Giữ ESP32 tắt nguồn trong lúc lắp. Dùng hai điện trở mắc **nối tiếp**, không nối
-GPIO35 trực tiếp vào cực dương pin:
-
-```text
-Pin (+) ── R1 220 kOhm ──┬── GPIO35 (ADC1_CH7)
-                         │
-                       R2 100 kOhm
-                         │
-Pin (-) ─────────────────┴── GND ESP32
-```
-
-| Điểm mạch | Kết nối |
-|---|---|
-| Đầu ngoài của R1 220 kOhm | Cực dương cell pin |
-| Mối nối R1–R2 | GPIO35 |
-| Đầu ngoài của R2 100 kOhm | Cực âm cell pin và GND ESP32 |
-| Cực âm pin | Bắt buộc nối chung GND với ESP32 |
-
-Tỉ lệ danh định:
-
-```text
-V_gpio35 = V_bat × 100 / (220 + 100) = V_bat / 3.2
-V_bat    = V_gpio35 × 3.2
-```
-
-Ví dụ, pin `4.20 V` phải tạo khoảng `1.31 V` tại GPIO35. Firmware dùng
-`analogReadMilliVolts()` để lấy điện áp ADC đã hiệu chuẩn thay cho công thức
-`raw × 3.3 / 4095`, vì cách quy đổi raw lý tưởng có thể sai đáng kể trên ESP32.
-
-Quy trình kiểm tra bằng đồng hồ:
-
-1. Đặt que đen vào cực âm pin/GND chung.
-2. Đặt que đỏ vào cực dương **cell pin**: đây là `V_bat` thực.
-3. Chuyển que đỏ sang mối nối R1–R2/GPIO35: số đo phải xấp xỉ `V_bat / 3.2`.
-4. Nếu bước 2 là `4.20 V`, bước 3 phải khoảng `1.31 V` và Serial phải gần
-   `4.20 V` sau sai số ADC/điện trở.
-5. Nếu Serial vẫn lệch, đo điện trở thực tế khi đã tháo nguồn và cập nhật
-   `BAT_DIVIDER_R_TOP_OHM`, `BAT_DIVIDER_R_BOTTOM_OHM`; chỉ dùng
-   `BATTERY_VOLTAGE_CALIBRATION` để bù sai số nhỏ còn lại.
-
-Không đo nhầm chân `5V/VIN`, đầu ra USB hoặc đầu vào bộ sạc thành điện áp cell.
-Nếu đồng hồ đo **trực tiếp giữa hai cực một cell Li-ion/LiPo** thật sự là
-`4.6 V`, phải ngắt sạc và ngừng sử dụng pin/mạch sạc để kiểm tra; mức này vượt
-điện áp sạc thông thường `4.2 V` của cell một ngăn và có nguy cơ mất an toàn.
 
 ## 3.3.4 Thiết kế phần cứng gateway
 
@@ -162,8 +114,6 @@ Breadboard dễ sụt áp và nhiễu hơn PCB, nhất là khi RA-02 phát. Khi 
 - Gần MPU6050: 1 tụ gốm `100 nF` giữa VCC và GND; thêm `10 uF` nếu dây I2C dài hoặc góc/rung bị nhiễu.
 - Gần cảm biến độ ẩm đất: 1 tụ gốm `100 nF` giữa VCC và GND.
 - Tại chân AO/GPIO34: 1 tụ gốm `100 nF` từ GPIO34 xuống GND để lọc nhiễu ADC.
-- Tại chân đo pin GPIO35: 1 tụ gốm `100 nF` từ GPIO35 xuống GND; nếu số đo pin vẫn dao động thì thay bằng `1 uF`.
-
 Nếu LoRa phát làm ESP32 reset hoặc gateway/node mất gói nhiều, ưu tiên kiểm tra nguồn 3.3 V trước, sau đó tăng tụ bulk rail chính lên `1000 uF`.
 
 ### 3.3.5.3 Lọc nguồn ESP32
@@ -190,14 +140,9 @@ Nếu LoRa phát làm ESP32 reset hoặc gateway/node mất gói nhiều, ưu ti
 - Gắn 1 tụ gốm `100 nF` từ chân AO/GPIO34 xuống GND gần ESP32 để lọc nhiễu ADC.
 - Nếu tín hiệu AO còn nhiễu, có thể thêm điện trở nối tiếp `1 kOhm` giữa AO và GPIO34; tụ `100 nF` vẫn đặt từ GPIO34 xuống GND.
 
-### 3.3.5.7 Lọc tín hiệu đo pin
-
-- Gắn 1 tụ gốm `100 nF` từ GPIO35 xuống GND.
-- Nếu giá trị pin dao động mạnh, có thể thay bằng `1 uF`. Khi dùng `1 uF`, sau khi wake-up nên đợi ít nhất 100 ms trước khi đọc ADC.
-
 ## 3.3.6 Yêu cầu thi công và an toàn nguồn
 
-- Tất cả GND phải nối chung: ESP32, RA-02, MPU6050, cảm biến độ ẩm, mạch chia áp pin.
+- Tất cả GND phải nối chung: ESP32, RA-02, MPU6050 và cảm biến độ ẩm.
 - Không cấp RA-02 từ nguồn 5 V.
 - Dây SPI LoRa nên ngắn. Dây antenna phải đúng loại 433 MHz nếu firmware để 433 MHz.
 - Cảm biến độ ẩm đất điện dung nên bọc/giữ đầu nối khô, tránh nước chạm mạch.
@@ -206,6 +151,6 @@ Nếu LoRa phát làm ESP32 reset hoặc gateway/node mất gói nhiều, ưu ti
 
 Thiết kế phần cứng sử dụng chung nền tảng ESP32 và RA-02 cho cả node và gateway,
 giúp thống nhất giao tiếp LoRa và giảm số loại linh kiện. Node được bổ sung
-MPU6050, cảm biến độ ẩm và mạch đo pin, trong khi gateway đảm nhiệm kết nối
+MPU6050 và cảm biến độ ẩm, trong khi gateway đảm nhiệm kết nối
 Internet. Yêu cầu quan trọng nhất khi lắp ráp là sử dụng nguồn 3,3 V ổn định,
 nối chung GND và bố trí tụ lọc gần các module tiêu thụ dòng xung lớn.

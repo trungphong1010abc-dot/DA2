@@ -7,7 +7,7 @@
 Project có 2 firmware PlatformIO:
 
 - `gateway`: ESP32 + RA-02 LoRa + WiFi, nhận dữ liệu node và publish telemetry lên ThingsBoard.
-- `node`: ESP32 + RA-02 LoRa + MPU6050 + cảm biến độ ẩm đất điện dung + mạch chia áp pin.
+- `node`: ESP32 + RA-02 LoRa + MPU6050 + cảm biến độ ẩm đất điện dung.
 
 ## Build nhanh
 
@@ -30,7 +30,7 @@ Mặc định `platformio.ini` build env `gateway`. Đổi `default_envs` nếu 
 Sửa trong `src/common/project_config.h`:
 
 - WiFi và ThingsBoard MQTT.
-- Chân RA-02, MPU6050, soil ADC, battery ADC.
+- Chân RA-02, MPU6050 và soil ADC.
 - `SOIL_ADC_DRY`, `SOIL_ADC_WET` sau khi hiệu chuẩn cảm biến độ ẩm đất.
 - Tham số cơ học đất: gamma, chiều dày lớp trượt, lực dính, góc ma sát trong, ngưỡng cảnh báo.
 

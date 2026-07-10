@@ -16,11 +16,10 @@ enum ErrorFlag : uint16_t {
   ERR_NONE = 0,
   ERR_SOIL = 1 << 0,
   ERR_MPU = 1 << 1,
-  ERR_BATTERY = 1 << 2,
-  ERR_LORA = 1 << 3,
-  ERR_PACKET = 1 << 4,
-  ERR_DATA_RANGE = 1 << 5,
-  ERR_CONFIG = 1 << 6,
+  ERR_LORA = 1 << 2,
+  ERR_PACKET = 1 << 3,
+  ERR_DATA_RANGE = 1 << 4,
+  ERR_CONFIG = 1 << 5,
 };
 
 struct SensorPacket {
@@ -35,7 +34,6 @@ struct SensorPacket {
   float vibrationRmsG = 0.0f;
   float pitchDeg = 0.0f;
   float rollDeg = 0.0f;
-  float batteryV = 0.0f;
   uint16_t errorFlags = ERR_NONE;
   int rssi = 0;
 };

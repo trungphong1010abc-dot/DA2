@@ -19,11 +19,7 @@ struct Result {
   float strainIndex = NAN;
   String alertLevel = "NORMAL";
   String riskStatus = "SAFE";
-  String warningMessage = "Dat on dinh";
   String dutyCycleMode = "NORMAL";
-  String batteryStatus = "NORMAL";
-  bool otaSupported = false;
-  bool otaLocked = false;
   uint32_t nextSleepSeconds = 0;
 };
 
