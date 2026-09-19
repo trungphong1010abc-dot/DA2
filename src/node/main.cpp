@@ -27,7 +27,9 @@ struct MpuReadout {
 };
 
 RTC_DATA_ATTR uint32_t rtcPacketId = 0;
-RTC_DATA_ATTR uint32_t rtcSleepSeconds = Config::SLEEP_NORMAL_SEC;
+RTC_DATA_ATTR uint32_t rtcSleepSeconds = 0;
+// Measure immediately on first boot, then once every six timer wakeups.
+RTC_DATA_ATTR uint8_t rtcWakeCount = Config::NODE_WAKES_PER_MEASUREMENT - 1;
 RTC_DATA_ATTR float rtcPreviousBetaDeg = 0.0f;
 RTC_DATA_ATTR bool rtcHasPreviousBeta = false;
 RTC_DATA_ATTR bool rtcPendingPacketValid = false;
@@ -426,26 +428,24 @@ void validateSnapshot(Protocol::SensorPacket &data) {
   }
 }
 
-uint32_t localSleepFallback(const Protocol::SensorPacket &data) {
-  return Analysis::evaluate(data).nextSleepSeconds;
-}
-
 void rememberMpuBaseline(float betaDeg) {
   rtcPreviousBetaDeg = betaDeg;
   rtcHasPreviousBeta = true;
+  rtcSleepSeconds = 0;
   previousBetaSampleMs = millis();
 }
 
 void sleepOrDelay(uint32_t sleepSeconds) {
-  sleepSeconds = constrain(sleepSeconds, Config::SLEEP_DANGER_SEC, Config::SLEEP_NORMAL_SEC);
-  rtcSleepSeconds = sleepSeconds;
+  rtcSleepSeconds += sleepSeconds;
 
   Serial.printf("[POWER] next cycle in %.1f minutes\n", sleepSeconds / 60.0f);
   Serial.flush();
 
   powerSensors(false);
   if (Config::NODE_ENABLE_DEEP_SLEEP) {
-    LoRa.sleep();
+    if (loraReady) {
+      LoRa.sleep();
+    }
     esp_sleep_enable_timer_wakeup(static_cast<uint64_t>(sleepSeconds) * 1000000ULL);
     esp_deep_sleep_start();
   }
@@ -454,9 +454,21 @@ void sleepOrDelay(uint32_t sleepSeconds) {
 }
 
 void runCycle() {
-  flushPendingPacket();
+  ++rtcWakeCount;
+  if (rtcWakeCount < Config::NODE_WAKES_PER_MEASUREMENT) {
+    Serial.printf("[POWER] wake=%u/%u; measurement not due\n",
+                  rtcWakeCount, Config::NODE_WAKES_PER_MEASUREMENT);
+    sleepOrDelay(Config::NODE_WAKE_INTERVAL_SEC);
+    return;
+  }
+  rtcWakeCount = 0;
 
-  uint32_t nextSleep = Config::SLEEP_NORMAL_SEC;
+  printMpuCalibrationProfile();
+  powerSensors(true);
+  configureAdc();
+  mpuReady = initMpu6050();
+  loraReady = initLora();
+  flushPendingPacket();
 
   for (uint8_t sampleIndex = 0; sampleIndex < Config::NODE_MEASUREMENTS_PER_WAKE; ++sampleIndex) {
     Protocol::SensorPacket data;
@@ -488,15 +500,12 @@ void runCycle() {
 
     Protocol::AckPacket ack;
     bool ackOk = sendTelemetryAndWaitAck(data, ack);
-    nextSleep = localSleepFallback(data);
     if (!ackOk) {
       data.errorFlags |= Protocol::ERR_LORA;
       storePendingPacket(Protocol::buildDataPacket(data));
-      Serial.printf("[LoRa] no ACK; error_flag=%u (%s), using local sleep fallback\n",
+      Serial.printf("[LoRa] no ACK; error_flag=%u (%s)\n",
                     data.errorFlags,
                     Analysis::errorFlagsToText(data.errorFlags));
-    } else if (ack.sleepSeconds > 0) {
-      nextSleep = ack.sleepSeconds;
     }
 
     Serial.printf("[DATA] sample=%u/%u packet_id=%lu soil_adc_filtered=%d h_soil=%.2f beta_deg=%.3f "
@@ -520,7 +529,7 @@ void runCycle() {
     }
   }
 
-  sleepOrDelay(nextSleep);
+  sleepOrDelay(Config::NODE_WAKE_INTERVAL_SEC);
 }
 
 } // namespace
@@ -531,12 +540,6 @@ void setup() {
   Serial.printf("\n[%s NODE] boot packetId=%lu\n",
                 Config::PROJECT_TAG,
                 static_cast<unsigned long>(rtcPacketId));
-  printMpuCalibrationProfile();
-
-  powerSensors(true);
-  configureAdc();
-  mpuReady = initMpu6050();
-  loraReady = initLora();
 }
 
 void loop() {

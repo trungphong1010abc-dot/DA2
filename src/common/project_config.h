@@ -74,8 +74,10 @@ static constexpr uint32_t SENSOR_WARMUP_MS = 800;
 static constexpr uint32_t MPU_SAMPLE_INTERVAL_MS = 200;
 static constexpr uint32_t MPU_WINDOW_MS = 2000;
 static constexpr uint32_t ACK_TIMEOUT_MS = 2500;
-static constexpr uint8_t NODE_MEASUREMENTS_PER_WAKE = 10;
+static constexpr uint8_t NODE_MEASUREMENTS_PER_WAKE = 1;
 static constexpr uint32_t NODE_INTER_MEASUREMENT_DELAY_MS = 1000;
+static constexpr uint32_t NODE_WAKE_INTERVAL_SEC = 5UL * 60UL;
+static constexpr uint8_t NODE_WAKES_PER_MEASUREMENT = 6;
 
 static constexpr uint32_t SLEEP_NORMAL_SEC = 30UL * 60UL;
 static constexpr uint32_t SLEEP_WARNING_SEC = 20UL * 60UL;
